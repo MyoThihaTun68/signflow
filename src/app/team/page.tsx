@@ -101,7 +101,16 @@ export default function TeamHubPage() {
       if (data.inviteUrl) {
         await navigator.clipboard.writeText(data.inviteUrl).catch(() => undefined);
       }
-      toast(`Invited ${roleLabel(newRole)} (invite link copied to clipboard!)`, 'ok');
+      if (data.inviteDelivered) {
+        toast(`Email invite sent via ${String(data.inviteTransport || 'Supabase').toUpperCase()} (& link copied)!`, 'ok');
+      } else {
+        toast(
+          data.inviteError
+            ? `Added to team (email note: ${data.inviteError}) — invite link copied!`
+            : `Added ${roleLabel(newRole)} — invite link copied to clipboard!`,
+          'warn',
+        );
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to invite member', 'err');
     } finally {

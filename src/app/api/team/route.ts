@@ -1,7 +1,9 @@
+import { isSupabaseConfigured } from '@/lib/server/config';
 import { getRepo } from '@/lib/server/db';
 import { toPublicEvents } from '@/lib/server/documents';
 import { baseUrl, cleanText, isValidEmail, jsonError } from '@/lib/server/http';
 import { escapeHtml, sendMail } from '@/lib/server/mailer';
+import { supabaseAdmin } from '@/lib/server/supabase';
 import { createInviteToken, loadTeamRoster, removeTeamMember, upsertTeamMember } from '@/lib/server/team';
 import { normalizeRole, roleLabel, type OrgRole } from '@/lib/types';
 
@@ -91,7 +93,11 @@ export async function POST(req: Request) {
   const inviteUrl = `${baseUrl(req)}/team?invite=${encodeURIComponent(inviteToken)}`;
 
   let inviteDelivered = false;
+  let inviteTransport: 'resend' | 'smtp' | 'supabase' | 'console' = 'console';
+  let inviteError: string | null = null;
+
   if (body.sendInvite !== false) {
+    // 1. Try configured SMTP / Resend first
     const mail = await sendMail({
       to: email,
       subject: `You're invited to SignFlow Team Hub as ${roleLabel(role)}`,
@@ -104,8 +110,46 @@ export async function POST(req: Request) {
         <p style="font-size:12px;color:#6e6e73">Invite link: ${escapeHtml(inviteUrl)}</p>
       </div>`,
     });
-    inviteDelivered = mail.delivered;
+
+    if (mail.delivered) {
+      inviteDelivered = true;
+      inviteTransport = mail.transport;
+    } else if (isSupabaseConfigured()) {
+      // 2. Fallback to Supabase Auth's built-in email invite service (`inviteUserByEmail`)
+      try {
+        const sb = supabaseAdmin();
+        const { error: invErr } = await sb.auth.admin.inviteUserByEmail(email, {
+          redirectTo: inviteUrl,
+          data: { name, role, department },
+        });
+        if (!invErr) {
+          inviteDelivered = true;
+          inviteTransport = 'supabase';
+        } else {
+          // If the user was already invited in Supabase Auth, send a magic-link email instead
+          const alreadyExists = /already|registered|exists/i.test(invErr.message);
+          if (alreadyExists) {
+            const { error: otpErr } = await sb.auth.signInWithOtp({
+              email,
+              options: { emailRedirectTo: inviteUrl, shouldCreateUser: false },
+            });
+            if (!otpErr) {
+              inviteDelivered = true;
+              inviteTransport = 'supabase';
+            } else {
+              inviteError = otpErr.message;
+            }
+          } else {
+            inviteError = invErr.message;
+          }
+        }
+      } catch (err) {
+        inviteError = err instanceof Error ? err.message : String(err);
+      }
+    } else {
+      inviteError = mail.error ?? null;
+    }
   }
 
-  return Response.json({ roster, inviteDelivered, inviteUrl });
+  return Response.json({ roster, inviteDelivered, inviteTransport, inviteError, inviteUrl });
 }
