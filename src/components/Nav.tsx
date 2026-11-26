@@ -211,6 +211,13 @@ export function Nav() {
               </svg>
               Verify PDF
             </Link>
+            <Link href="/guide" className={`tab ${pathname.startsWith('/guide') ? 'active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5m0 3.5h.01" />
+              </svg>
+              Guide
+            </Link>
           </nav>
 
           {/* Clean Right Header: Single Profile Dropdown + Appearance Toggle */}
@@ -389,6 +396,13 @@ export function Nav() {
             <path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4Zm-2.5 9 2 2 4-4" />
           </svg>
           <span>Verify</span>
+        </Link>
+        <Link href="/guide" className={`m-tab ${pathname.startsWith('/guide') ? 'active' : ''}`}>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5m0 3.5h.01" />
+          </svg>
+          <span>Guide</span>
         </Link>
       </nav>
     </>

@@ -1032,6 +1032,34 @@ input[type='range'] { width: 100%; accent-color: var(--primary); cursor: pointer
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
 }
 
+/* ── Guide Page Flow Grid & Step Badges ── */
+.guide-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.guide-flow-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.guide-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.78rem;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+
 /* ── Frosted iOS Mobile Bottom Tab Bar (< 720px) ── */
 .mobile-tabbar {
   display: none;
@@ -1042,6 +1070,7 @@ input[type='range'] { width: 100%; accent-color: var(--primary); cursor: pointer
   .sticky { position: static; }
 }
 @media (max-width: 720px) {
+  .guide-flow-grid { grid-template-columns: repeat(2, 1fr); }
   .topbar-inner { flex-wrap: nowrap; gap: 10px; padding: 10px 14px; }
   .topbar .tabs { display: none; }
   .container { padding: 16px 14px 94px; }
@@ -1053,7 +1082,7 @@ input[type='range'] { width: 100%; accent-color: var(--primary); cursor: pointer
 
   .mobile-tabbar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     position: fixed;
     left: 0;
     right: 0;
