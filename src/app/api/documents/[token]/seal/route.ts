@@ -1,18 +1,27 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import { getRepo } from '@/lib/server/db';
-import { findByToken, hasValidSession } from '@/lib/server/documents';
+import { findByToken, hasValidSession, toPublicDocument } from '@/lib/server/documents';
 import { hmacHex, sha256Hex } from '@/lib/server/crypto';
-import { baseUrl, cleanText, clientIp, jsonError, userAgent } from '@/lib/server/http';
-import { completedEmail, sendMail } from '@/lib/server/mailer';
+import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from '@/lib/server/http';
+import { completedEmail, sendMail, signRequestEmail } from '@/lib/server/mailer';
 import { getObject, putObject } from '@/lib/server/storage';
 import { isP12Configured, signWithP12 } from '@/lib/server/p12';
 import { formatUtc } from '@/lib/pdf/certificate';
 import { DECISION_COLORS, dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
-import { DECISION_LABELS, type Decision, type StampConfig } from '@/lib/types';
+import {
+  DECISION_LABELS,
+  ORG_ROLE_LABELS,
+  type Decision,
+  type OrgRole,
+  type SignerHistoryEntry,
+  type StampConfig,
+} from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+
+const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 interface SealBody {
   signature?: unknown;
@@ -23,6 +32,12 @@ interface SealBody {
   decision?: unknown;
   note?: unknown;
   signerName?: unknown;
+  signerEmail?: unknown;
+  signerRole?: unknown;
+  /** Optional: forward to next person in the chain (e.g. HR -> Director -> Boss) instead of locking final */
+  forwardToRole?: unknown;
+  forwardToName?: unknown;
+  forwardToEmail?: unknown;
 }
 
 const num = (v: unknown, min: number, max: number): number | null =>
@@ -33,9 +48,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const repo = getRepo();
   const doc = await findByToken(token);
   if (!doc) return jsonError('Not found', 404);
-  if (doc.status !== 'pending_cosign') return jsonError('This document has already been sealed.', 409);
-  if (!hasValidSession(req, doc)) return jsonError('Email verification required (or expired). Verify the OTP again.', 401);
-  if (!doc.original_pdf_path || !doc.stage1_sha256) return jsonError('Original PDF is missing.', 500);
+  if (doc.status !== 'pending_cosign') return jsonError('This document has already been finalized.', 409);
+  if (!hasValidSession(req, doc))
+    return jsonError('Email verification required (or expired). Verify the OTP again.', 401);
+
+  const sourcePath = doc.final_pdf_path || doc.original_pdf_path;
+  if (!sourcePath || !doc.stage1_sha256) return jsonError('Source PDF is missing.', 500);
 
   const body = (await req.json().catch(() => ({}))) as SealBody;
   const decision = (['approved', 'approved_with_notes', 'rejected'] as const).find((d) => d === body.decision) as
@@ -46,19 +64,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const cy = num(body.cy, 0, 1);
   const widthFrac = num(body.widthFrac, 0.04, 0.9);
   const note = cleanText(body.note, 600) || null;
-  const signerName = cleanText(body.signerName, 120) || doc.signer2_name || doc.signer2_email || 'Signer 2';
+  const signerName = cleanText(body.signerName, 120) || doc.signer2_name || doc.signer2_email || 'Team Signer';
+  const signerEmail = cleanText(body.signerEmail, 254).toLowerCase() || doc.signer2_email || 'signer@signflow.org';
+  const roleRaw = cleanText(body.signerRole, 32) as OrgRole;
+  const signerRole: OrgRole = ROLES.includes(roleRaw) ? roleRaw : doc.stamp_config?.assigned_role || 'director';
   const signature = typeof body.signature === 'string' ? body.signature : '';
+
+  const forwardRoleRaw = cleanText(body.forwardToRole, 32) as OrgRole;
+  const forwardToRole: OrgRole | null = ROLES.includes(forwardRoleRaw) ? forwardRoleRaw : null;
+  const forwardToName = cleanText(body.forwardToName, 120) || null;
+  const forwardToEmail = cleanText(body.forwardToEmail, 254).toLowerCase() || null;
+  const isForwarding = Boolean(forwardToRole && decision !== 'rejected');
 
   if (!decision) return jsonError('Choose a decision.');
   if (decision === 'approved_with_notes' && !note) return jsonError('Add a note for "Approved w/ Notes".');
   if (page === null || cx === null || cy === null || widthFrac === null) return jsonError('Invalid stamp position.');
   if (!signature.startsWith('data:image/png;base64,') || signature.length > 2_500_000)
     return jsonError('Signature must be a PNG image under ~1.8 MB.');
+  if (isForwarding && forwardToEmail && !isValidEmail(forwardToEmail))
+    return jsonError('Enter a valid email for the next approver.');
 
-  const original = await getObject(doc.original_pdf_path);
-  if (!original) return jsonError('Original PDF could not be loaded from storage.', 500);
-  if (sha256Hex(original) !== doc.stage1_sha256)
-    return jsonError('Integrity check failed: stored original does not match its registered fingerprint.', 500);
+  const sourceBytes = await getObject(sourcePath);
+  if (!sourceBytes) return jsonError('PDF could not be loaded from storage.', 500);
 
   const ip = clientIp(req);
   const ua = userAgent(req);
@@ -66,33 +93,30 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
 
   let pdf: PDFDocument;
   try {
-    pdf = await PDFDocument.load(original, { updateMetadata: false });
+    pdf = await PDFDocument.load(sourceBytes, { updateMetadata: false });
   } catch {
-    return jsonError('Original PDF could not be parsed.', 500);
+    return jsonError('PDF could not be parsed.', 500);
   }
   const pageIndex = Math.floor(page);
   if (pageIndex >= pdf.getPageCount()) return jsonError('Page out of range.');
 
+  const roleBadge = ORG_ROLE_LABELS[signerRole].toUpperCase();
   let stamp;
   try {
     stamp = await drawStamp(pdf, pageIndex, dataUrlToBytes(signature), { cx, cy, widthFrac }, [
-      { text: DECISION_LABELS[decision].toUpperCase(), size: 9, bold: true, color: DECISION_COLORS[decision] },
-      { text: `${signerName} · ${formatUtc(signedAt)}`, size: 7, color: rgb(0.25, 0.29, 0.36) },
-      ...(note ? [{ text: `Note: ${note}`, size: 7, color: rgb(0.3, 0.33, 0.4) }] : []),
-      { text: `Ref ${doc.ref_code} · OTP verified`, size: 6, color: rgb(0.5, 0.55, 0.62) },
+      {
+        text: `${roleBadge} · ${DECISION_LABELS[decision].toUpperCase()}`,
+        size: 8.5,
+        bold: true,
+        color: DECISION_COLORS[decision],
+      },
+      { text: `${signerName} (${signerEmail})`, size: 6.8, color: rgb(0.22, 0.26, 0.34) },
+      { text: `${formatUtc(signedAt)} · Ref ${doc.ref_code}`, size: 6.2, color: rgb(0.45, 0.5, 0.58) },
+      ...(note ? [{ text: `Note: ${note}`, size: 6.8, color: rgb(0.28, 0.31, 0.38) }] : []),
     ]);
   } catch {
     return jsonError('Signature image could not be embedded.', 400);
   }
-
-  await repo.addEvent({
-    document_id: doc.id,
-    event_type: 'signed',
-    actor_email: doc.signer2_email,
-    ip_address: ip,
-    user_agent: ua,
-    metadata: { decision, note, page: pageIndex + 1, signer_name: signerName },
-  });
 
   const signedContent = await pdf.save();
   const signedContentSha = sha256Hex(signedContent);
@@ -100,18 +124,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const sealValue = hmacHex(`${doc.ref_code}|${doc.stage1_sha256}|${signedContentSha}|${decision}`);
   const origin = baseUrl(req);
 
-  // Do NOT append an extra blank Certificate page — keep only the original pages
-  // with the transparent signature stamp overlaid so the document background stays 100% intact.
   pdf.setTitle(doc.title);
   pdf.setSubject(`SignFlow ${doc.ref_code}`);
-  pdf.setKeywords(['SignFlow', doc.ref_code, 'sealed', `seal:${sealValue.slice(0, 32)}`]);
+  pdf.setKeywords(['SignFlow', doc.ref_code, isForwarding ? 'in_progress' : 'sealed', `seal:${sealValue.slice(0, 32)}`]);
   pdf.setProducer('SignFlow (pdf-lib)');
   pdf.setModificationDate(new Date());
 
   const hashSealed = await pdf.save();
   let finalBytes: Uint8Array = hashSealed;
   let appliedSeal: 'p12' | 'hash' = 'hash';
-  if (sealMethod === 'p12') {
+  if (!isForwarding && sealMethod === 'p12') {
     try {
       const forSigning = await PDFDocument.load(hashSealed, { updateMetadata: false });
       const p12 = await signWithP12(forSigning, signerName);
@@ -128,7 +150,109 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const finalPath = `final/${doc.id}.pdf`;
   await putObject(finalPath, finalBytes);
 
+  const prevSignatures = doc.stamp_config?.signatures ?? [];
+  const newEntry: SignerHistoryEntry = {
+    actorName: signerName,
+    actorEmail: signerEmail,
+    actorRole: signerRole,
+    decision,
+    note,
+    page: pageIndex + 1,
+    signedAt,
+    ipAddress: ip,
+    sha256AfterSign: finalSha,
+    finalSeal: !isForwarding,
+  };
+  const allSignatures = [...prevSignatures, newEntry];
+
+  await repo.addEvent({
+    document_id: doc.id,
+    event_type: 'signed',
+    actor_email: signerEmail,
+    ip_address: ip,
+    user_agent: ua,
+    metadata: {
+      decision,
+      note,
+      page: pageIndex + 1,
+      actor_name: signerName,
+      actor_role: signerRole,
+      sha256: finalSha,
+      forwarded_to: isForwarding ? forwardToRole : null,
+    },
+  });
+
+  if (isForwarding && forwardToRole) {
+    const nextEmail = forwardToEmail || `${forwardToRole}@signflow.org`;
+    const nextName = forwardToName || ORG_ROLE_LABELS[forwardToRole];
+    const stampConfig: StampConfig = {
+      ...doc.stamp_config,
+      page: pageIndex,
+      x: Number(stamp.x.toFixed(2)),
+      y: Number(stamp.y.toFixed(2)),
+      scale: widthFrac,
+      cx,
+      cy,
+      decision,
+      note,
+      seal_method: appliedSeal,
+      assigned_role: forwardToRole,
+      signatures: allSignatures,
+    };
+    const updatedDoc = await repo.updateDocument(doc.id, {
+      status: 'pending_cosign',
+      signer2_name: nextName,
+      signer2_email: nextEmail,
+      final_pdf_path: finalPath,
+      final_sha256: finalSha,
+      stamp_config: stampConfig,
+    });
+
+    const signUrl = `${origin}/sign/${token}`;
+    if (forwardToEmail) {
+      await sendMail(
+        signRequestEmail({
+          to: nextEmail,
+          signer2Name: nextName,
+          signer1Name: `${signerName} (${ORG_ROLE_LABELS[signerRole]})`,
+          signer1Email: signerEmail,
+          title: doc.title,
+          refCode: doc.ref_code,
+          url: signUrl,
+        }),
+      );
+    }
+
+    await repo.addEvent({
+      document_id: doc.id,
+      event_type: 'sent',
+      actor_email: signerEmail,
+      ip_address: ip,
+      user_agent: ua,
+      metadata: {
+        kind: 'forwarded',
+        actor_name: signerName,
+        actor_role: signerRole,
+        to_role: forwardToRole,
+        to_name: nextName,
+        to_email: nextEmail,
+        note,
+      },
+    });
+
+    const events = await repo.listEvents(doc.id);
+    return Response.json({
+      status: 'pending_cosign',
+      forwardedToRole: forwardToRole,
+      forwardedToName: nextName,
+      finalSha256: finalSha,
+      document: toPublicDocument(updatedDoc, true, events),
+    });
+  }
+
+  // Final lock & completion
   const stampConfig: StampConfig = {
+    ...doc.stamp_config,
     page: pageIndex,
     x: Number(stamp.x.toFixed(2)),
     y: Number(stamp.y.toFixed(2)),
@@ -138,10 +262,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     decision,
     note,
     seal_method: appliedSeal,
+    signatures: allSignatures,
   };
   const completedAt = new Date().toISOString();
-  await repo.updateDocument(doc.id, {
-    status: decision === 'rejected' ? 'rejected' : 'completed',
+  const nextStatus = decision === 'rejected' ? 'rejected' : 'completed';
+  const updatedDoc = await repo.updateDocument(doc.id, {
+    status: nextStatus,
+    signer2_name: signerName,
+    signer2_email: signerEmail,
     final_pdf_path: finalPath,
     final_sha256: finalSha,
     stamp_config: stampConfig,
@@ -149,7 +277,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   });
 
   const downloadUrl = `${origin}/api/documents/${token}/file?type=final&download=1`;
-  const recipients = [doc.signer1_email, doc.signer2_email].filter((e): e is string => Boolean(e));
+  const recipients = [doc.signer1_email, signerEmail, ...allSignatures.map((s) => s.actorEmail)].filter(
+    (e): e is string => Boolean(e),
+  );
   const mail = recipients.length
     ? await sendMail(
         completedEmail({
@@ -167,24 +297,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   await repo.addEvent({
     document_id: doc.id,
     event_type: 'completed',
-    actor_email: doc.signer2_email,
+    actor_email: signerEmail,
     ip_address: ip,
     user_agent: ua,
     metadata: {
+      actor_name: signerName,
+      actor_role: signerRole,
       final_sha256: finalSha,
       signed_content_sha256: signedContentSha,
       seal_method: appliedSeal,
+      total_signatures: allSignatures.length,
       notified: recipients,
       email_delivered: mail?.delivered ?? false,
     },
   });
 
+  const events = await repo.listEvents(doc.id);
   return Response.json({
-    status: decision === 'rejected' ? 'rejected' : 'completed',
+    status: nextStatus,
     finalSha256: finalSha,
     sealMethod: appliedSeal,
     downloadUrl,
     viewUrl: `/api/documents/${token}/file?type=final`,
     emailDelivered: mail?.delivered ?? false,
+    document: toPublicDocument(updatedDoc, true, events),
   });
 }

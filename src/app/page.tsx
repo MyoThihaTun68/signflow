@@ -31,6 +31,7 @@ import { rasterizePdf } from '@/lib/client/pdfjs';
 import { buildScanPdf, downloadBytes, slugify } from '@/lib/client/buildPdf';
 import { generateSamplePaperBlob } from '@/lib/client/samplePaper';
 import { sha256Hex } from '@/lib/client/sha256';
+import { ORG_ROLE_LABELS, type OrgRole, type TeamMember } from '@/lib/types';
 
 type Handle = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'w' | 'e';
 
@@ -39,6 +40,9 @@ interface CreatedDoc {
   token: string;
   signUrl: string;
   sha256: string;
+  senderRole?: OrgRole;
+  assignedRole?: OrgRole;
+  requireOtp?: boolean;
   emailDelivered: boolean;
   emailTransport: 'resend' | 'smtp' | 'console';
   emailError: string | null;
@@ -57,11 +61,15 @@ export default function ScanPreparePage() {
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  const [roster, setRoster] = useState<TeamMember[]>([]);
   const [title, setTitle] = useState('');
-  const [signer1Name, setSigner1Name] = useState('');
-  const [signer1Email, setSigner1Email] = useState('');
-  const [signer2Name, setSigner2Name] = useState('');
-  const [signer2Email, setSigner2Email] = useState('');
+  const [senderRole, setSenderRole] = useState<OrgRole>('hr');
+  const [signer1Name, setSigner1Name] = useState('Noy Chanthavong (HR)');
+  const [signer1Email, setSigner1Email] = useState('hr@signflow.org');
+  const [assignedRole, setAssignedRole] = useState<OrgRole>('director');
+  const [signer2Name, setSigner2Name] = useState('Somsack Phomvihane (Director)');
+  const [signer2Email, setSigner2Email] = useState('director@signflow.org');
+  const [requireOtp, setRequireOtp] = useState(false);
   const [includeMark, setIncludeMark] = useState(false);
   const [markPng, setMarkPng] = useState<string | null>(null);
   const [markPos, setMarkPos] = useState<'bl' | 'br'>('br');
@@ -77,6 +85,36 @@ export default function ScanPreparePage() {
   const dragRef = useRef<{ handle: Handle; startX: number; startY: number; start: CropRect } | null>(null);
 
   const active = pages.find((p) => p.id === activeId) ?? pages[0] ?? null;
+
+  // Load saved team roster so HR / Director / Boss can be picked in 1 click
+  useEffect(() => {
+    fetch('/api/team', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.roster?.length) setRoster(data.roster as TeamMember[]);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const pickSenderRole = (role: OrgRole) => {
+    setSenderRole(role);
+    const match = roster.find((m) => m.role === role);
+    if (match) {
+      setSigner1Name(match.name);
+      setSigner1Email(match.email);
+    }
+  };
+
+  const pickAssignedRole = (role: OrgRole) => {
+    setAssignedRole(role);
+    const match = roster.find((m) => m.role === role);
+    if (match) {
+      setSigner2Name(match.name);
+      setSigner2Email(match.email);
+    }
+    if (role === 'external') setRequireOtp(true);
+    else setRequireOtp(false);
+  };
 
   // ── Import images & PDFs ──
   const addImageBlob = useCallback(async (blob: Blob, name: string): Promise<ScanPage> => {
@@ -384,6 +422,9 @@ export default function ScanPreparePage() {
       form.append('signer1Email', signer1Email.trim());
       form.append('signer2Name', signer2Name.trim());
       form.append('signer2Email', signer2Email.trim());
+      form.append('senderRole', senderRole);
+      form.append('assignedRole', assignedRole);
+      form.append('requireOtp', String(requireOtp));
       form.append('clientSha256', clientSha);
 
       const res = await fetch('/api/documents', { method: 'POST', body: form });
@@ -460,6 +501,9 @@ export default function ScanPreparePage() {
                 </button>
                 <Link href={`/sign/${created.token}`} className="btn btn-primary">
                   Open Signing Page →
+                </Link>
+                <Link href="/team" className="btn">
+                  Team Hub
                 </Link>
               </div>
               <div className="row-between">
@@ -860,7 +904,12 @@ export default function ScanPreparePage() {
             </div>
 
             <div className="card stack">
-              <h2>Document &amp; Signers</h2>
+              <div className="row-between">
+                <h2>Document &amp; Team Routing</h2>
+                <Link href="/team" className="btn btn-sm">
+                  Manage Team
+                </Link>
+              </div>
               <label className="field">
                 <span>Document Title</span>
                 <input
@@ -870,44 +919,101 @@ export default function ScanPreparePage() {
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </label>
+
+              <div className="field">
+                <span>Prepared By (Your Role)</span>
+                <div className="seg full">
+                  {(['hr', 'director', 'boss', 'manager'] as OrgRole[]).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      className={senderRole === r ? 'active' : ''}
+                      onClick={() => pickSenderRole(r)}
+                    >
+                      {ORG_ROLE_LABELS[r]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="fields-2">
                 <label className="field">
-                  <span>Signer 1 Name (you)</span>
+                  <span>Sender Name</span>
                   <input
                     className="input"
-                    placeholder="Alex Rivera"
+                    placeholder="Noy (HR)"
                     value={signer1Name}
                     onChange={(e) => setSigner1Name(e.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>Signer 1 Email</span>
+                  <span>Sender Email</span>
                   <input
                     className="input"
                     type="email"
-                    placeholder="alex@company.com"
+                    placeholder="hr@signflow.org"
                     value={signer1Email}
                     onChange={(e) => setSigner1Email(e.target.value)}
                   />
                 </label>
               </div>
+
+              <div className="field">
+                <span>Route To (Next Approver / Signer Role)</span>
+                <div className="seg full">
+                  {(['director', 'boss', 'hr', 'finance', 'external'] as OrgRole[]).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      className={assignedRole === r ? 'active' : ''}
+                      onClick={() => pickAssignedRole(r)}
+                    >
+                      {ORG_ROLE_LABELS[r]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {roster.length > 0 && (
+                <label className="field">
+                  <span>Quick-Pick Team Member</span>
+                  <select
+                    className="select"
+                    value={signer2Email}
+                    onChange={(e) => {
+                      const m = roster.find((x) => x.email === e.target.value);
+                      if (m) {
+                        setAssignedRole(m.role);
+                        setSigner2Name(m.name);
+                        setSigner2Email(m.email);
+                      }
+                    }}
+                  >
+                    {roster.map((m) => (
+                      <option key={m.id} value={m.email}>
+                        {ORG_ROLE_LABELS[m.role]} — {m.name} ({m.email})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
               <div className="fields-2">
                 <label className="field">
-                  <span>Signer 2 Name</span>
+                  <span>Assignee Name</span>
                   <input
                     className="input"
-                    placeholder="Jordan Lee"
+                    placeholder="Somsack (Director)"
                     value={signer2Name}
                     onChange={(e) => setSigner2Name(e.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>Signer 2 Email (required)</span>
+                  <span>Assignee Email (required)</span>
                   <input
                     className="input"
                     type="email"
                     required
-                    placeholder="jordan@client.com"
+                    placeholder="director@signflow.org"
                     value={signer2Email}
                     onChange={(e) => setSigner2Email(e.target.value)}
                   />
@@ -915,8 +1021,13 @@ export default function ScanPreparePage() {
               </div>
 
               <label className="check">
+                <input type="checkbox" checked={requireOtp} onChange={(e) => setRequireOtp(e.target.checked)} />
+                <span>Require 6-Digit Email OTP (off by default for fast internal HR / Director / Boss signing)</span>
+              </label>
+
+              <label className="check">
                 <input type="checkbox" checked={includeMark} onChange={(e) => setIncludeMark(e.target.checked)} />
-                <span>Add Signer 1 digital mark (Draw or Type)</span>
+                <span>Add your digital mark on page 1 before routing (Draw or Type)</span>
               </label>
 
               {includeMark && (

@@ -6,12 +6,19 @@ import { PdfCanvasViewer } from '@/components/PdfCanvasViewer';
 import { QrCodeSvg } from '@/components/QrCodeSvg';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
-import { DECISION_LABELS, type Decision, type PublicDocument } from '@/lib/types';
+import {
+  DECISION_LABELS,
+  ORG_ROLE_LABELS,
+  type Decision,
+  type OrgRole,
+  type PublicDocument,
+  type TeamMember,
+} from '@/lib/types';
 
 const DECISION_HEX: Record<Decision, string> = {
-  approved: '#15803d',
-  approved_with_notes: '#b45309',
-  rejected: '#dc2626',
+  approved: '#1d9a45',
+  approved_with_notes: '#c96a00',
+  rejected: '#d72638',
 };
 
 export function CoSignWorkspace({ token }: { token: string }) {
@@ -21,10 +28,11 @@ export function CoSignWorkspace({ token }: { token: string }) {
   const otpFormRef = useRef<HTMLFormElement | null>(null);
 
   const [doc, setDoc] = useState<PublicDocument | null>(null);
+  const [roster, setRoster] = useState<TeamMember[]>([]);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  // OTP state
+  // OTP state (only used when doc.requireOtp === true)
   const [verified, setVerified] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -33,19 +41,31 @@ export function CoSignWorkspace({ token }: { token: string }) {
   const [otpMsg, setOtpMsg] = useState<string | null>(null);
   const [otpErr, setOtpErr] = useState<string | null>(null);
 
-  // Placement state
+  // Active signer identity & placement state
   const [page, setPage] = useState(0);
   const [stampPos, setStampPos] = useState<{ page: number; cx: number; cy: number } | null>(null);
   const [widthFrac, setWidthFrac] = useState(0.24);
   const [decision, setDecision] = useState<Decision>('approved');
   const [note, setNote] = useState('');
+  const [signerRole, setSignerRole] = useState<OrgRole>('director');
   const [signerName, setSignerName] = useState('');
+  const [signerEmail, setSignerEmail] = useState('');
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
+
+  // Multi-step routing (e.g. Director stamps -> forwards to Boss for final stamp)
+  const [forwardMode, setForwardMode] = useState(false);
+  const [forwardRole, setForwardRole] = useState<OrgRole>('boss');
+  const [forwardName, setForwardName] = useState('Khamla Vongsa (Boss / CEO)');
+  const [forwardEmail, setForwardEmail] = useState('boss@signflow.org');
 
   // Seal state
   const [sealing, setSealing] = useState(false);
   const [sealErr, setSealErr] = useState<string | null>(null);
   const [sealedHash, setSealedHash] = useState<string | null>(null);
+
+  // Live Team Chat state
+  const [chatText, setChatText] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
 
   const viewedLogged = useRef(false);
 
@@ -54,23 +74,40 @@ export function CoSignWorkspace({ token }: { token: string }) {
     setLoadErr(null);
     (async () => {
       try {
-        const res = await fetch(`/api/documents/${token}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Document not found.');
+        const [docRes, teamRes] = await Promise.all([
+          fetch(`/api/documents/${token}`, { cache: 'no-store' }),
+          fetch('/api/team', { cache: 'no-store' }).catch(() => null),
+        ]);
+        const data = await docRes.json();
+        if (!docRes.ok) throw new Error(data.error || 'Document not found.');
         if (cancelled) return;
         const pub = data as PublicDocument;
         setDoc(pub);
         setVerified(pub.sessionVerified);
+        setSignerRole(pub.assignedRole || 'director');
         setSignerName(pub.signer2Name || '');
+        setSignerEmail(pub.signer2Email || '');
         if (pub.finalSha256) setSealedHash(pub.finalSha256);
+
+        if (teamRes && teamRes.ok) {
+          const tData = await teamRes.json();
+          if (tData?.roster?.length) {
+            const rList = tData.roster as TeamMember[];
+            setRoster(rList);
+            const bossMember = rList.find((m) => m.role === 'boss');
+            if (bossMember) {
+              setForwardName(bossMember.name);
+              setForwardEmail(bossMember.email);
+            }
+          }
+        }
 
         if (!viewedLogged.current) {
           viewedLogged.current = true;
           fetch(`/api/documents/${token}/view`, { method: 'POST' }).catch(() => undefined);
         }
 
-        const which = pub.status === 'completed' || pub.status === 'rejected' ? 'final' : 'original';
-        const pdfRes = await fetch(`/api/documents/${token}/file?type=${which}`, { cache: 'no-store' });
+        const pdfRes = await fetch(`/api/documents/${token}/file`, { cache: 'no-store' });
         if (!pdfRes.ok) throw new Error('Could not load PDF file.');
         const bytes = new Uint8Array(await pdfRes.arrayBuffer());
         if (!cancelled) setPdfBytes(bytes);
@@ -82,6 +119,24 @@ export function CoSignWorkspace({ token }: { token: string }) {
       cancelled = true;
     };
   }, [token]);
+
+  const switchActiveRole = (role: OrgRole) => {
+    setSignerRole(role);
+    const match = roster.find((m) => m.role === role);
+    if (match) {
+      setSignerName(match.name);
+      setSignerEmail(match.email);
+    }
+  };
+
+  const switchForwardRole = (role: OrgRole) => {
+    setForwardRole(role);
+    const match = roster.find((m) => m.role === role);
+    if (match) {
+      setForwardName(match.name);
+      setForwardEmail(match.email);
+    }
+  };
 
   const sendOtp = async () => {
     setOtpBusy(true);
@@ -149,15 +204,31 @@ export function CoSignWorkspace({ token }: { token: string }) {
           decision,
           note: note.trim() || null,
           signerName: signerName.trim() || null,
+          signerEmail: signerEmail.trim() || null,
+          signerRole,
+          forwardToRole: forwardMode && decision !== 'rejected' ? forwardRole : null,
+          forwardToName: forwardMode && decision !== 'rejected' ? forwardName : null,
+          forwardToEmail: forwardMode && decision !== 'rejected' ? forwardEmail : null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to seal document.');
       setSealedHash(data.finalSha256);
-      setDoc((prev) => (prev ? { ...prev, status: data.status, finalSha256: data.finalSha256, decision } : prev));
-      toast(`Document sealed (${DECISION_LABELS[decision]})`, 'ok');
+      if (data.document) {
+        const updated = data.document as PublicDocument;
+        setDoc(updated);
+        if (data.forwardedToRole) {
+          switchActiveRole(data.forwardedToRole as OrgRole);
+          setForwardMode(false);
+          setSignaturePng(null);
+          setNote('');
+          toast(`Stamped & forwarded to ${ORG_ROLE_LABELS[data.forwardedToRole as OrgRole]}!`, 'ok');
+        } else {
+          toast(`Document finalized & sealed (${DECISION_LABELS[decision]})`, 'ok');
+        }
+      }
 
-      const finalRes = await fetch(`/api/documents/${token}/file?type=final`, { cache: 'no-store' });
+      const finalRes = await fetch(`/api/documents/${token}/file?t=${Date.now()}`, { cache: 'no-store' });
       if (finalRes.ok) {
         const bytes = new Uint8Array(await finalRes.arrayBuffer());
         setPdfBytes(bytes);
@@ -167,6 +238,33 @@ export function CoSignWorkspace({ token }: { token: string }) {
       setSealErr(err instanceof Error ? err.message : 'Failed to seal document.');
     } finally {
       setSealing(false);
+    }
+  };
+
+  const postComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatText.trim()) return;
+    setChatBusy(true);
+    try {
+      const res = await fetch(`/api/documents/${token}/comment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorName: signerName || ORG_ROLE_LABELS[signerRole],
+          authorEmail: signerEmail || `${signerRole}@signflow.org`,
+          authorRole: signerRole,
+          message: chatText.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not post comment.');
+      setChatText('');
+      setDoc((prev) => (prev ? { ...prev, comments: data.comments, events: data.events } : prev));
+      toast('Message posted to document thread', 'ok');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to send message', 'err');
+    } finally {
+      setChatBusy(false);
     }
   };
 
@@ -181,6 +279,9 @@ export function CoSignWorkspace({ token }: { token: string }) {
         <h2>Unable to open signing link</h2>
         <div className="alert alert-danger">{loadErr}</div>
         <div className="row">
+          <Link href="/team" className="btn btn-primary">
+            Open Team Hub
+          </Link>
           <Link href="/sign" className="btn">
             Back to Review &amp; Co-Sign
           </Link>
@@ -193,7 +294,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
     return (
       <div className="card">
         <span className="row muted">
-          <span className="spinner" /> Loading signing request...
+          <span className="spinner" /> Loading signing workspace...
         </span>
       </div>
     );
@@ -207,27 +308,81 @@ export function CoSignWorkspace({ token }: { token: string }) {
         <div>
           <div className="row" style={{ marginBottom: 6 }}>
             <span className="badge badge-primary">{doc.refCode}</span>
+            <span className="badge badge-muted">From: {ORG_ROLE_LABELS[doc.senderRole]}</span>
+            <span className="badge badge-primary">Current Turn: {ORG_ROLE_LABELS[doc.assignedRole]}</span>
             {doc.status === 'completed' && <span className="badge badge-ok">✓ Completed &amp; Sealed</span>}
             {doc.status === 'rejected' && <span className="badge badge-danger">✕ Rejected &amp; Sealed</span>}
-            {doc.status === 'pending_cosign' && <span className="badge badge-warn">Awaiting Co-Signature</span>}
+            {doc.status === 'pending_cosign' && <span className="badge badge-warn">Awaiting Signature</span>}
+            {!doc.requireOtp && <span className="badge badge-ok">⚡ Instant Internal Sign (No OTP)</span>}
           </div>
           <h1>{doc.title}</h1>
           <p>
-            Prepared by <strong>{doc.signer1Name || doc.signer1Email || 'Sender'}</strong> · Co-signer{' '}
-            <strong>{doc.signer2Name || doc.signer2EmailMasked}</strong>
+            Prepared by <strong>{doc.signer1Name || doc.signer1Email || 'HR'}</strong> · Currently assigned to{' '}
+            <strong>
+              {ORG_ROLE_LABELS[doc.assignedRole]} ({doc.signer2Name || doc.signer2Email || doc.signer2EmailMasked})
+            </strong>
           </p>
         </div>
-        {isDone && (
-          <div className="row">
-            <a className="btn btn-primary" href={`/api/documents/${token}/file?type=final&download=1`}>
-              Download Sealed PDF
-            </a>
-            <Link className="btn" href="/verify">
-              Verify PDF &amp; Audit Trail →
-            </Link>
-          </div>
-        )}
+        <div className="row">
+          <Link className="btn" href="/team">
+            Team Hub &amp; Traceability
+          </Link>
+          {isDone && (
+            <>
+              <a className="btn btn-primary" href={`/api/documents/${token}/file?type=final&download=1`}>
+                Download Sealed PDF
+              </a>
+              <Link className="btn" href="/verify">
+                Verify PDF →
+              </Link>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* ── Traceable Signature Chain Banner ── */}
+      {doc.signatures.length > 0 && (
+        <div className="card stack">
+          <div className="row-between">
+            <h2>Traceable Signature Chain ({doc.signatures.length} Stamp{doc.signatures.length > 1 ? 's' : ''} Applied)</h2>
+            <span className="badge badge-ok">Original Background 100% Preserved</span>
+          </div>
+          <div className="stack-sm">
+            {doc.signatures.map((s, idx) => (
+              <div
+                key={idx}
+                className="row-between"
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 12,
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div className="row">
+                  <span className="badge badge-primary">#{idx + 1} · {ORG_ROLE_LABELS[s.actorRole]}</span>
+                  <strong>{s.actorName}</strong>
+                  <span className="small muted">({s.actorEmail})</span>
+                  <span
+                    className={`badge ${
+                      s.decision === 'rejected'
+                        ? 'badge-danger'
+                        : s.decision === 'approved_with_notes'
+                          ? 'badge-warn'
+                          : 'badge-ok'
+                    }`}
+                  >
+                    {DECISION_LABELS[s.decision]} on Page {s.page}
+                  </span>
+                </div>
+                <div className="small muted mono">
+                  {new Date(s.signedAt).toISOString().replace('T', ' ').slice(0, 19)} UTC · IP {s.ipAddress}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isDone && (
         <div className="card card-hero stack">
@@ -235,16 +390,15 @@ export function CoSignWorkspace({ token }: { token: string }) {
             <div>
               <h2>✓ Document Sealed (Original Pages Only — No Extra Pages Added)</h2>
               <p className="muted small">
-                Your transparent signature stamp is embedded directly over the page background. The full audit trail &amp;
-                verification history are stored in the SignFlow ledger (view anytime under <strong>Verify PDF</strong>).
+                All transparent signature stamps are embedded directly over the original document background.
               </p>
             </div>
             <div className="row">
               <a className="btn btn-primary btn-sm" href={`/api/documents/${token}/file?type=final&download=1`}>
                 Download Sealed PDF
               </a>
-              <Link className="btn btn-sm" href="/verify">
-                View Audit Trail
+              <Link className="btn btn-sm" href="/team">
+                Open Team Hub
               </Link>
             </div>
           </div>
@@ -265,51 +419,135 @@ export function CoSignWorkspace({ token }: { token: string }) {
       )}
 
       <div className="grid-2">
-        {/* ── PDF canvas preview ── */}
-        <div className="card stack">
-          <div className="row-between">
-            <h2>{isDone ? 'Sealed PDF Preview' : 'Interactive Document Preview'}</h2>
-            {!isDone && verified && (
-              <span className="badge badge-primary">
-                {stampPos
-                  ? `Stamp on page ${stampPos.page + 1} (click page or drag stamp)`
-                  : 'Click anywhere on the page to place stamp'}
-              </span>
-            )}
+        {/* ── Left column: PDF canvas preview + Live Team Chat & Audit History ── */}
+        <div className="stack">
+          <div className="card stack">
+            <div className="row-between">
+              <h2>{isDone ? 'Sealed PDF Preview' : 'Interactive Document Preview'}</h2>
+              {!isDone && verified && (
+                <span className="badge badge-primary">
+                  {stampPos
+                    ? `Stamp on page ${stampPos.page + 1} (click page or drag stamp)`
+                    : 'Click anywhere on the page to place stamp'}
+                </span>
+              )}
+            </div>
+            <PdfCanvasViewer
+              data={pdfBytes}
+              page={page}
+              onPageChange={setPage}
+              interactive={!isDone && verified && Boolean(signaturePng)}
+              onPlace={(p, cx, cy) => setStampPos({ page: p, cx, cy })}
+              stamp={
+                !isDone && verified && signaturePng && stampPos
+                  ? {
+                      page: stampPos.page,
+                      cx: stampPos.cx,
+                      cy: stampPos.cy,
+                      widthFrac,
+                      png: signaturePng,
+                      caption: `${ORG_ROLE_LABELS[signerRole].toUpperCase()} · ${DECISION_LABELS[decision].toUpperCase()}`,
+                      captionColor: DECISION_HEX[decision],
+                    }
+                  : null
+              }
+            />
           </div>
-          <PdfCanvasViewer
-            data={pdfBytes}
-            page={page}
-            onPageChange={setPage}
-            interactive={!isDone && verified && Boolean(signaturePng)}
-            onPlace={(p, cx, cy) => setStampPos({ page: p, cx, cy })}
-            stamp={
-              !isDone && verified && signaturePng && stampPos
-                ? {
-                    page: stampPos.page,
-                    cx: stampPos.cx,
-                    cy: stampPos.cy,
-                    widthFrac,
-                    png: signaturePng,
-                    caption: DECISION_LABELS[decision].toUpperCase(),
-                    captionColor: DECISION_HEX[decision],
-                  }
-                : null
-            }
-          />
+
+          {/* ── Live Organization Discussion (HR ↔ Director ↔ Boss) ── */}
+          <div className="card stack">
+            <div className="row-between">
+              <div>
+                <h2>Team Discussion (HR ↔ Director ↔ Boss)</h2>
+                <p className="muted small">
+                  Communicate directly on this document — every message is recorded in the audit timeline.
+                </p>
+              </div>
+              <span className="badge badge-primary">{doc.comments.length} message(s)</span>
+            </div>
+
+            {doc.comments.length === 0 ? (
+              <div className="small muted" style={{ padding: '10px 0' }}>
+                No team messages yet. Start the conversation below (e.g. &ldquo;@Director please check clause 3 before
+                forwarding to Boss&rdquo;).
+              </div>
+            ) : (
+              <div className="stack-sm">
+                {doc.comments.map((c) => (
+                  <div
+                    key={c.id}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 12,
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <div className="row-between" style={{ marginBottom: 4 }}>
+                      <div className="row">
+                        <span className="badge badge-primary">{ORG_ROLE_LABELS[c.authorRole]}</span>
+                        <strong>{c.authorName}</strong>
+                        <span className="small muted">{c.authorEmail}</span>
+                      </div>
+                      <span className="small muted mono">
+                        {new Date(c.createdAt).toISOString().replace('T', ' ').slice(0, 19)} UTC
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.92rem' }}>{c.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <form className="copy-field" onSubmit={postComment}>
+              <input
+                className="input"
+                placeholder={`Message as ${ORG_ROLE_LABELS[signerRole]} (${signerName || signerEmail || 'Team'})...`}
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary" disabled={chatBusy || !chatText.trim()}>
+                {chatBusy ? 'Sending...' : 'Send Message'}
+              </button>
+            </form>
+          </div>
+
+          {/* ── Live Traceable Audit Log ── */}
+          <div className="card stack">
+            <div className="row-between">
+              <h2>Full Traceable History Log ({doc.events.length})</h2>
+              <span className="badge badge-muted">Who · Which Role · IP · UTC Time</span>
+            </div>
+            <ul className="timeline">
+              {doc.events.map((ev, i) => (
+                <li key={i} className={ev.type}>
+                  <div className="row" style={{ gap: 6 }}>
+                    <span className="t-title">{ev.label}</span>
+                    {ev.actorRole && <span className="badge badge-primary">{ORG_ROLE_LABELS[ev.actorRole]}</span>}
+                  </div>
+                  {ev.detail && <div style={{ fontSize: '0.88rem', margin: '3px 0' }}>&ldquo;{ev.detail}&rdquo;</div>}
+                  <div className="t-meta">
+                    {new Date(ev.createdAt).toISOString().replace('T', ' ').slice(0, 19)} UTC
+                    {ev.actorName ? ` · ${ev.actorName}` : ''}
+                    {ev.actorEmail ? ` (${ev.actorEmail})` : ''}
+                    {ev.ipAddress ? ` · IP ${ev.ipAddress}` : ''}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
-        {/* ── Gate + co-sign controls ── */}
+        {/* ── Right column: Role Switcher + Sign & Forward / Final Seal Controls ── */}
         <div className="stack sticky">
-          {!isDone && !verified && (
+          {!isDone && !verified && doc.requireOtp && (
             <div className="card stack">
               <div className="row-between">
                 <h2>Email OTP Verification</h2>
-                <span className="badge badge-warn">Security Gate</span>
+                <span className="badge badge-warn">External OTP Gate</span>
               </div>
               <p className="muted small">
-                To verify your identity and record an auditable signature, click below to send a 6-digit verification code to{' '}
-                <strong>{doc.signer2EmailMasked}</strong>.
+                This document requires a 6-digit verification code sent to <strong>{doc.signer2EmailMasked}</strong>.
               </p>
               <button type="button" className="btn btn-primary btn-block" disabled={otpBusy} onClick={sendOtp}>
                 {otpBusy
@@ -342,13 +580,12 @@ export function CoSignWorkspace({ token }: { token: string }) {
               {otpSent && (
                 <form ref={otpFormRef} className="stack" method="POST" onSubmit={verifyOtp}>
                   <div className="field">
-                    <label htmlFor={otpInputId} style={{ fontSize: '0.8rem', fontWeight: 620, color: '#334155' }}>
+                    <label htmlFor={otpInputId} style={{ fontSize: '0.8rem', fontWeight: 620 }}>
                       Enter 6-Digit Verification Code
                     </label>
                     <p id={otpHintId} className="field-hint">
                       Type or paste the 6-digit code sent to {doc.signer2EmailMasked}.
                     </p>
-                    {/* Single semantic input styled as 6 visual digit slots (preserves autocomplete="one-time-code" & paste) */}
                     <label className="otp-slot-wrap" htmlFor={otpInputId}>
                       <div className="otp-slots" aria-hidden>
                         {Array.from({ length: 6 }, (_, i) => {
@@ -396,19 +633,71 @@ export function CoSignWorkspace({ token }: { token: string }) {
           {!isDone && verified && (
             <div className="card stack">
               <div className="row-between">
-                <h2>Co-Sign &amp; Seal</h2>
-                <span className="badge badge-ok">✓ OTP Verified</span>
+                <h2>Sign as Organization Role</h2>
+                <span className="badge badge-ok">{doc.requireOtp ? '✓ OTP Verified' : '⚡ Instant Team Sign'}</span>
               </div>
 
-              <label className="field">
-                <span>Your Full Name</span>
-                <input
-                  className="input"
-                  placeholder="Jordan Lee"
-                  value={signerName}
-                  onChange={(e) => setSignerName(e.target.value)}
-                />
-              </label>
+              <div className="field">
+                <span>Your Role in Organization</span>
+                <div className="seg full">
+                  {(['hr', 'director', 'boss', 'finance'] as OrgRole[]).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      className={signerRole === r ? 'active' : ''}
+                      onClick={() => switchActiveRole(r)}
+                    >
+                      {ORG_ROLE_LABELS[r]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {roster.length > 0 && (
+                <label className="field">
+                  <span>Quick-Select Team Member Identity</span>
+                  <select
+                    className="select"
+                    value={signerEmail}
+                    onChange={(e) => {
+                      const m = roster.find((x) => x.email === e.target.value);
+                      if (m) {
+                        setSignerRole(m.role);
+                        setSignerName(m.name);
+                        setSignerEmail(m.email);
+                      }
+                    }}
+                  >
+                    {roster.map((m) => (
+                      <option key={m.id} value={m.email}>
+                        {ORG_ROLE_LABELS[m.role]} — {m.name} ({m.email})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <div className="fields-2">
+                <label className="field">
+                  <span>Your Name</span>
+                  <input
+                    className="input"
+                    placeholder="Somsack (Director)"
+                    value={signerName}
+                    onChange={(e) => setSignerName(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Your Email</span>
+                  <input
+                    className="input"
+                    type="email"
+                    placeholder="director@signflow.org"
+                    value={signerEmail}
+                    onChange={(e) => setSignerEmail(e.target.value)}
+                  />
+                </label>
+              </div>
 
               <div className="field">
                 <span>Decision</span>
@@ -427,10 +716,10 @@ export function CoSignWorkspace({ token }: { token: string }) {
               </div>
 
               <label className="field">
-                <span>Note {decision === 'approved_with_notes' ? '(required)' : '(optional)'}</span>
+                <span>Note / Comment {decision === 'approved_with_notes' ? '(required)' : '(optional)'}</span>
                 <textarea
                   className="textarea"
-                  placeholder="Add review notes or conditions..."
+                  placeholder="e.g. Checked by Director, forwarding to Boss for final approval..."
                   value={note}
                   maxLength={600}
                   onChange={(e) => setNote(e.target.value)}
@@ -438,14 +727,19 @@ export function CoSignWorkspace({ token }: { token: string }) {
               </label>
 
               <div className="field">
-                <span>Your Signature (Draw, Type, or Photo Scan)</span>
+                <span>Your Signature Stamp (Draw, Type, or Photo Scan)</span>
                 <SignatureCreator
                   allowPhoto
                   defaultText={signerName}
                   value={signaturePng}
                   onChange={(png) => {
                     setSignaturePng(png);
-                    if (png && !stampPos) setStampPos({ page, cx: 0.72, cy: 0.82 });
+                    if (png && !stampPos) {
+                      // Offset stamp position automatically if previous signers already stamped
+                      const offset = doc.signatures.length;
+                      const cx = offset === 0 ? 0.3 : offset === 1 ? 0.72 : 0.5;
+                      setStampPos({ page, cx, cy: 0.82 });
+                    }
                   }}
                 />
               </div>
@@ -467,26 +761,73 @@ export function CoSignWorkspace({ token }: { token: string }) {
               <div className="field">
                 <span>Quick Stamp Placement (Page {page + 1})</span>
                 <div className="seg full">
-                  <button
-                    type="button"
-                    onClick={() => setStampPos({ page, cx: 0.24, cy: 0.82 })}
-                  >
-                    Bottom-Left
+                  <button type="button" onClick={() => setStampPos({ page, cx: 0.24, cy: 0.82 })}>
+                    Bottom-Left (HR/Dir)
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setStampPos({ page, cx: 0.5, cy: 0.82 })}
-                  >
+                  <button type="button" onClick={() => setStampPos({ page, cx: 0.5, cy: 0.82 })}>
                     Bottom-Center
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setStampPos({ page, cx: 0.76, cy: 0.82 })}
-                  >
-                    Bottom-Right
+                  <button type="button" onClick={() => setStampPos({ page, cx: 0.76, cy: 0.82 })}>
+                    Bottom-Right (Boss)
                   </button>
                 </div>
               </div>
+
+              {decision !== 'rejected' && (
+                <div className="stack-sm">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={forwardMode}
+                      onChange={(e) => setForwardMode(e.target.checked)}
+                    />
+                    <span>Stamp &amp; Forward to Next Approver (e.g. Director → Boss) before final lock</span>
+                  </label>
+
+                  {forwardMode && (
+                    <div
+                      className="stack-sm"
+                      style={{
+                        padding: 12,
+                        borderRadius: 12,
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <span className="small muted" style={{ fontWeight: 600 }}>
+                        Forward Next To:
+                      </span>
+                      <div className="seg full">
+                        {(['boss', 'director', 'hr', 'finance'] as OrgRole[]).map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            className={forwardRole === r ? 'active' : ''}
+                            onClick={() => switchForwardRole(r)}
+                          >
+                            {ORG_ROLE_LABELS[r]}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="fields-2">
+                        <input
+                          className="input"
+                          placeholder="Next Signer Name"
+                          value={forwardName}
+                          onChange={(e) => setForwardName(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          type="email"
+                          placeholder="boss@signflow.org"
+                          value={forwardEmail}
+                          onChange={(e) => setForwardEmail(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {sealErr && <div className="alert alert-danger">{sealErr}</div>}
 
@@ -498,10 +839,12 @@ export function CoSignWorkspace({ token }: { token: string }) {
               >
                 {sealing ? (
                   <>
-                    <span className="spinner" /> Sealing &amp; Stamping PDF...
+                    <span className="spinner" /> Stamping PDF...
                   </>
+                ) : forwardMode && decision !== 'rejected' ? (
+                  `Stamp as ${ORG_ROLE_LABELS[signerRole]} & Forward to ${ORG_ROLE_LABELS[forwardRole]}`
                 ) : (
-                  'Seal & Lock Final PDF'
+                  `Stamp as ${ORG_ROLE_LABELS[signerRole]} & Finalize PDF`
                 )}
               </button>
             </div>
@@ -517,11 +860,21 @@ export function CoSignWorkspace({ token }: { token: string }) {
               <dd>
                 <code>{doc.refCode}</code>
               </dd>
+              <dt>Prepared By</dt>
+              <dd>
+                {ORG_ROLE_LABELS[doc.senderRole]} · {doc.signer1Name || doc.signer1Email || '—'}
+              </dd>
+              <dt>Assigned To</dt>
+              <dd>
+                {ORG_ROLE_LABELS[doc.assignedRole]} · {doc.signer2Name || doc.signer2Email || '—'}
+              </dd>
+              <dt>Stamps Applied</dt>
+              <dd>{doc.signatures.length}</dd>
               <dt>Stage-1 Hash</dt>
               <dd className="mono">{doc.stage1Sha256?.slice(0, 22)}...</dd>
               {doc.finalSha256 && (
                 <>
-                  <dt>Final Hash</dt>
+                  <dt>Latest Hash</dt>
                   <dd className="mono">{doc.finalSha256.slice(0, 22)}...</dd>
                 </>
               )}

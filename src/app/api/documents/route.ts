@@ -5,11 +5,13 @@ import { randomRefCode, randomToken, sha256Hex } from '@/lib/server/crypto';
 import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from '@/lib/server/http';
 import { sendMail, signRequestEmail } from '@/lib/server/mailer';
 import { drawRefFooter } from '@/lib/pdf/stamp';
+import type { OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const MAX_PDF_BYTES = 4.3 * 1024 * 1024; // stay below Vercel's 4.5 MB request limit
+const MAX_PDF_BYTES = 4.3 * 1024 * 1024;
+const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 export async function POST(req: Request) {
   let form: FormData;
@@ -25,11 +27,16 @@ export async function POST(req: Request) {
   const signer1Email = cleanText(form.get('signer1Email'), 254).toLowerCase() || null;
   const signer2Name = cleanText(form.get('signer2Name'), 120) || null;
   const signer2Email = cleanText(form.get('signer2Email'), 254).toLowerCase();
+  const senderRoleRaw = cleanText(form.get('senderRole'), 32) as OrgRole;
+  const assignedRoleRaw = cleanText(form.get('assignedRole'), 32) as OrgRole;
+  const senderRole: OrgRole = ROLES.includes(senderRoleRaw) ? senderRoleRaw : 'hr';
+  const assignedRole: OrgRole = ROLES.includes(assignedRoleRaw) ? assignedRoleRaw : 'director';
+  const requireOtp = form.get('requireOtp') === 'true' || form.get('requireOtp') === '1';
 
   if (!(file instanceof Blob) || file.size === 0) return jsonError('A PDF file is required.');
   if (file.size > MAX_PDF_BYTES) return jsonError('PDF is larger than 4.3 MB. Reduce pages or zoom and try again.', 413);
-  if (!signer2Email || !isValidEmail(signer2Email)) return jsonError('A valid Signer 2 email is required.');
-  if (signer1Email && !isValidEmail(signer1Email)) return jsonError('Signer 1 email is not valid.');
+  if (!signer2Email || !isValidEmail(signer2Email)) return jsonError('A valid assignee / co-signer email is required.');
+  if (signer1Email && !isValidEmail(signer1Email)) return jsonError('Sender email is not valid.');
 
   const raw = new Uint8Array(await file.arrayBuffer());
   if (String.fromCharCode(...raw.slice(0, 5)) !== '%PDF-') return jsonError('Uploaded file is not a PDF.');
@@ -42,7 +49,6 @@ export async function POST(req: Request) {
   for (let i = 0; i < 8 && (await repo.refCodeExists(refCode)); i++) refCode = randomRefCode();
   const token = randomToken();
 
-  // Normalise the PDF server-side: stamp reference footer + metadata, then fingerprint.
   let pdfBytes: Uint8Array;
   let pageCount = 0;
   try {
@@ -83,14 +89,32 @@ export async function POST(req: Request) {
     return jsonError('Failed to store the PDF. Check storage configuration.', 500);
   }
 
-  await repo.updateDocument(doc.id, { original_pdf_path: objectPath, stage1_sha256: stage1 });
+  await repo.updateDocument(doc.id, {
+    original_pdf_path: objectPath,
+    stage1_sha256: stage1,
+    stamp_config: {
+      require_otp: requireOtp,
+      sender_role: senderRole,
+      assigned_role: assignedRole,
+      signatures: [],
+    },
+  });
   await repo.addEvent({
     document_id: doc.id,
     event_type: 'created',
     actor_email: signer1Email,
     ip_address: ip,
     user_agent: ua,
-    metadata: { title, pages: pageCount, bytes: pdfBytes.length, stage1_sha256: stage1 },
+    metadata: {
+      title,
+      pages: pageCount,
+      bytes: pdfBytes.length,
+      stage1_sha256: stage1,
+      actor_name: signer1Name,
+      actor_role: senderRole,
+      assigned_role: assignedRole,
+      require_otp: requireOtp,
+    },
   });
 
   const signUrl = `${baseUrl(req)}/sign/${token}`;
@@ -105,7 +129,16 @@ export async function POST(req: Request) {
     actor_email: signer1Email,
     ip_address: ip,
     user_agent: ua,
-    metadata: { to: signer2Email, email_delivered: mail.delivered, transport: mail.transport, error: mail.error ?? null },
+    metadata: {
+      to: signer2Email,
+      to_name: signer2Name,
+      assigned_role: assignedRole,
+      actor_name: signer1Name,
+      actor_role: senderRole,
+      email_delivered: mail.delivered,
+      transport: mail.transport,
+      error: mail.error ?? null,
+    },
   });
 
   return Response.json({
@@ -113,6 +146,9 @@ export async function POST(req: Request) {
     token,
     signUrl,
     sha256: stage1,
+    senderRole,
+    assignedRole,
+    requireOtp,
     emailDelivered: mail.delivered,
     emailTransport: mail.transport,
     emailError: mail.error ?? null,

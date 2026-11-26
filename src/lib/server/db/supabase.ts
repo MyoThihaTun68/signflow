@@ -101,6 +101,26 @@ export const supabaseRepo: Repo = {
     if (error) fail('updateOtp', error);
   },
 
+  async listDocuments(limit = 60) {
+    const { data, error } = await supabaseAdmin()
+      .from('documents')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) fail('listDocuments', error);
+    return (data ?? []) as DocumentRecord[];
+  },
+
+  async listRecentEvents(limit = 100) {
+    const { data, error } = await supabaseAdmin()
+      .from('audit_events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) fail('listRecentEvents', error);
+    return (data ?? []) as AuditEvent[];
+  },
+
   async ping() {
     const { count, error } = await supabaseAdmin().from('documents').select('id', { count: 'exact', head: true });
     if (error) fail('ping', error);

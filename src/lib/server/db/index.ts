@@ -46,6 +46,8 @@ export interface Repo {
   createOtp(otp: NewOtp): Promise<OtpRecord>;
   latestOtp(documentId: string, email: string): Promise<OtpRecord | null>;
   updateOtp(id: string, patch: Partial<Pick<OtpRecord, 'verified' | 'attempts'>>): Promise<void>;
+  listDocuments(limit?: number): Promise<DocumentRecord[]>;
+  listRecentEvents(limit?: number): Promise<AuditEvent[]>;
   ping(): Promise<{ documents: number }>;
 }
 
@@ -91,6 +93,8 @@ function withLocalFallback(primary: Repo, fallback: Repo): Repo {
     createOtp: wrap('createOtp'),
     latestOtp: wrap('latestOtp'),
     updateOtp: wrap('updateOtp'),
+    listDocuments: wrap('listDocuments'),
+    listRecentEvents: wrap('listRecentEvents'),
     ping: wrap('ping'),
   };
 }

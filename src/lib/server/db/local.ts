@@ -171,6 +171,30 @@ export const localRepo: Repo = {
     }, true);
   },
 
+  listDocuments(limit = 60) {
+    return tx(
+      (db) =>
+        clone(
+          [...db.documents]
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+            .slice(0, limit),
+        ),
+      false,
+    );
+  },
+
+  listRecentEvents(limit = 100) {
+    return tx(
+      (db) =>
+        clone(
+          [...db.audit_events]
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+            .slice(0, limit),
+        ),
+      false,
+    );
+  },
+
   ping() {
     return tx((db) => ({ documents: db.documents.length }), false);
   },

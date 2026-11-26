@@ -32,6 +32,7 @@ export async function POST(req: Request) {
       createdAt: doc.created_at,
       completedAt: doc.completed_at,
       sha256,
+      signatures: doc.stamp_config?.signatures ?? [],
       events: toPublicEvents(await repo.listEvents(doc.id)),
     };
   } else if (refCode && (await repo.getDocumentByRef(refCode))) {
