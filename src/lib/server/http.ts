@@ -16,6 +16,18 @@ export function userAgent(req: Request): string {
 
 export function baseUrl(req: Request): string {
   if (env.appUrl) return env.appUrl;
+  const origin = req.headers.get('origin');
+  if (origin && /^https?:\/\/[^/\s]+$/i.test(origin)) {
+    return origin.replace(/\/+$/, '');
+  }
+  const referer = req.headers.get('referer');
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+      // ignore invalid referer
+    }
+  }
   const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'localhost:3000';
   const proto =
     req.headers.get('x-forwarded-proto') || (host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https');
