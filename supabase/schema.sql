@@ -80,10 +80,11 @@ grant all on public.documents    to service_role;
 grant all on public.audit_events to service_role;
 grant all on public.otp_codes    to service_role;
 
--- ── Private storage bucket for PDFs ──────────────────────────
+-- ── Private storage bucket for PDFs & Team Roster JSON ──────
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('documents', 'documents', false, 10485760, array['application/pdf'])
-on conflict (id) do nothing;
+values ('documents', 'documents', false, 10485760, array['application/pdf', 'application/json'])
+on conflict (id) do update
+  set allowed_mime_types = array['application/pdf', 'application/json'];
 
 -- ── Housekeeping: purge expired OTP codes older than 1 day ────
 create or replace function public.purge_expired_otps() returns void
