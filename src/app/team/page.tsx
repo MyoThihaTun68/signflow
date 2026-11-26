@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
 import {
   DECISION_LABELS,
@@ -43,6 +44,7 @@ interface ActivityItem extends PublicAuditEvent {
 
 export default function TeamHubPage() {
   const { toast } = useToast();
+  const { user, openAuthModal, refreshAuth } = useAuth();
   const [roster, setRoster] = useState<TeamMember[]>([]);
   const [documents, setDocuments] = useState<TeamDocItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -101,10 +103,14 @@ export default function TeamHubPage() {
       setNewName('');
       setNewEmail('');
       setNewDept('');
+      refreshAuth();
+      if (data.inviteUrl) {
+        await navigator.clipboard.writeText(data.inviteUrl).catch(() => undefined);
+      }
       toast(
         data.inviteDelivered
-          ? `Added ${ORG_ROLE_LABELS[newRole]} & emailed invitation`
-          : `Added ${ORG_ROLE_LABELS[newRole]} to Team Hub (invite link copied/ready)`,
+          ? `Invited ${ORG_ROLE_LABELS[newRole]} by email (& copied invite link)`
+          : `Added ${ORG_ROLE_LABELS[newRole]} — personal invite link copied to clipboard!`,
         'ok',
       );
     } catch (err) {
@@ -128,9 +134,23 @@ export default function TeamHubPage() {
   };
 
   const copyInviteLink = async (m: TeamMember) => {
-    const url = `${window.location.origin}/team?email=${encodeURIComponent(m.email)}&role=${encodeURIComponent(m.role)}`;
+    const res = await fetch('/api/team', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        department: m.department,
+        sendInvite: false,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const url =
+      data.inviteUrl ||
+      `${window.location.origin}/team?email=${encodeURIComponent(m.email)}&role=${encodeURIComponent(m.role)}`;
     await navigator.clipboard.writeText(url);
-    toast(`Invite link for ${m.name} copied!`, 'ok');
+    toast(`Personal setup link for ${m.name} copied!`, 'ok');
   };
 
   const filteredDocs = documents.filter((d) => {
@@ -173,6 +193,46 @@ export default function TeamHubPage() {
           </Link>
         </div>
       </div>
+
+      {/* ── Signed-in Account / First-Time Setup Banner ── */}
+      {user ? (
+        <div className="card card-hero row-between">
+          <div className="row">
+            <span className="badge badge-ok">✓ Signed In</span>
+            <strong>{user.name}</strong>
+            <span className="muted small">({user.email})</span>
+            <span className="badge badge-primary">{ORG_ROLE_LABELS[user.role]}</span>
+            <span className="muted small">· {user.department}</span>
+          </div>
+          <div className="row">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setRoleFilter(roleFilter === user.role ? 'all' : user.role)}
+            >
+              {roleFilter === user.role ? 'Show All Team Papers' : `Filter My ${ORG_ROLE_LABELS[user.role]} Queue`}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card card-hero row-between">
+          <div>
+            <h2>First Time Here? Create Your Team Account or Sign In</h2>
+            <p className="muted small">
+              Create your account once with your organization email &amp; role (<strong>HR</strong>,{' '}
+              <strong>Director</strong>, or <strong>Boss</strong>). Next time, sign in with one click.
+            </p>
+          </div>
+          <div className="row">
+            <button type="button" className="btn" onClick={() => openAuthModal('login')}>
+              Sign In with Email
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => openAuthModal('register')}>
+              First-Time Create Account
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Role Filter Bar & Search ── */}
       <div className="card row-between">
@@ -430,13 +490,33 @@ export default function TeamHubPage() {
                     <div className="row">
                       <span className="badge badge-primary">{ORG_ROLE_LABELS[m.role]}</span>
                       <strong>{m.name}</strong>
+                      <span className={`badge ${m.status === 'active' ? 'badge-ok' : 'badge-warn'}`}>
+                        {m.status === 'active' ? '✓ Active' : 'Invited'}
+                      </span>
                     </div>
                     <div className="row">
+                      {m.status !== 'active' && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={() =>
+                            openAuthModal('register', {
+                              name: m.name,
+                              email: m.email,
+                              role: m.role,
+                              department: m.department,
+                            })
+                          }
+                          title="First-time setup for this invited member"
+                        >
+                          Activate
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-sm"
                         onClick={() => copyInviteLink(m)}
-                        title="Copy direct Team Hub invite link for this member"
+                        title="Copy personal account-activation invite link for this member"
                       >
                         Copy Invite
                       </button>

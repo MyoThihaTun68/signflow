@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import { PdfCanvasViewer } from '@/components/PdfCanvasViewer';
+import { useAuth } from '@/components/AuthProvider';
 import { QrCodeSvg } from '@/components/QrCodeSvg';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
@@ -23,6 +24,7 @@ const DECISION_HEX: Record<Decision, string> = {
 
 export function CoSignWorkspace({ token }: { token: string }) {
   const { toast } = useToast();
+  const { user, openAuthModal } = useAuth();
   const otpInputId = useId();
   const otpHintId = useId();
   const otpFormRef = useRef<HTMLFormElement | null>(null);
@@ -119,6 +121,14 @@ export function CoSignWorkspace({ token }: { token: string }) {
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    if (user) {
+      setSignerRole(user.role);
+      setSignerName(user.name);
+      setSignerEmail(user.email);
+    }
+  }, [user]);
 
   const switchActiveRole = (role: OrgRole) => {
     setSignerRole(role);
@@ -634,7 +644,19 @@ export function CoSignWorkspace({ token }: { token: string }) {
             <div className="card stack">
               <div className="row-between">
                 <h2>Sign as Organization Role</h2>
-                <span className="badge badge-ok">{doc.requireOtp ? '✓ OTP Verified' : '⚡ Instant Team Sign'}</span>
+                {user ? (
+                  <span className="badge badge-ok">
+                    ✓ Signed in: {ORG_ROLE_LABELS[user.role]}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => openAuthModal('login', { email: signerEmail, name: signerName, role: signerRole })}
+                  >
+                    Sign In / Create Account
+                  </button>
+                )}
               </div>
 
               <div className="field">

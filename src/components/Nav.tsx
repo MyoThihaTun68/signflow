@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { useAuth } from '@/components/AuthProvider';
+import { ORG_ROLE_LABELS } from '@/lib/types';
 
 type SchemeMode = 'system' | 'light' | 'dark';
 type AccentId = 'blue' | 'indigo' | 'emerald' | 'amber' | 'rose';
@@ -27,6 +29,7 @@ function applyMetaColorScheme(mode: SchemeMode) {
 
 export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'resend' | 'smtp' | 'console' }) {
   const pathname = usePathname() || '/';
+  const { user, openAuthModal, logout } = useAuth();
   const [scheme, setScheme] = useState<SchemeMode>('system');
   const [sysDark, setSysDark] = useState(false);
   const [accent, setAccent] = useState<AccentId>('blue');
@@ -165,6 +168,45 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
         </nav>
 
         <div className="env-badges">
+          {user ? (
+            <div className="row" style={{ gap: 6 }}>
+              <Link
+                href="/team"
+                className="badge badge-primary"
+                title={`Signed in as ${user.email}`}
+                style={{ padding: '5px 11px', textDecoration: 'none' }}
+              >
+                <span className="badge-dot" />
+                {ORG_ROLE_LABELS[user.role]} · {user.name.split(' (')[0]}
+              </Link>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={logout}
+                title="Sign out"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div className="row" style={{ gap: 6 }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => openAuthModal('login')}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => openAuthModal('register')}
+              >
+                Create Account
+              </button>
+            </div>
+          )}
+
           <span
             className={`badge ${backend === 'supabase' ? 'badge-ok' : 'badge-muted'}`}
             title={backend === 'supabase' ? 'Connected to Supabase PostgreSQL + Storage' : 'Using local .data fallback'}

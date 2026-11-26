@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CameraModal } from '@/components/CameraModal';
+import { useAuth } from '@/components/AuthProvider';
 import { QrCodeSvg } from '@/components/QrCodeSvg';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
@@ -51,6 +52,7 @@ interface CreatedDoc {
 
 export default function ScanPreparePage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [pages, setPages] = useState<ScanPage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [output, setOutput] = useState<OutputSettings>(DEFAULT_OUTPUT);
@@ -95,6 +97,15 @@ export default function ScanPreparePage() {
       })
       .catch(() => undefined);
   }, []);
+
+  // Automatically sync Sender fields when a user signs in
+  useEffect(() => {
+    if (user) {
+      setSenderRole(user.role);
+      setSigner1Name(user.name);
+      setSigner1Email(user.email);
+    }
+  }, [user]);
 
   const pickSenderRole = (role: OrgRole) => {
     setSenderRole(role);

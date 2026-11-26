@@ -21,7 +21,9 @@ export interface TeamMember {
   email: string;
   role: OrgRole;
   department: string;
+  status?: 'active' | 'invited';
   createdAt: string;
+  lastLoginAt?: string | null;
 }
 
 export interface DocumentComment {

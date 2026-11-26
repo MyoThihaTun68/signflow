@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { AuthProvider } from '@/components/AuthProvider';
 import { Nav } from '@/components/Nav';
 import { ToastProvider } from '@/components/Toast';
 import { isSupabaseConfigured, mailTransport } from '@/lib/server/config';
@@ -30,12 +31,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ToastProvider>
-          <Nav backend={backend} mail={mail} />
-          <main className="container">{children}</main>
-          <footer className="site-footer">
-            <span>SignFlow · SHA-256 Cryptographic Ledger · OTP-Verified Co-Signing</span>
-            <span>100% Original Color Scanner · iOS Minimalist Edition</span>
-          </footer>
+          <AuthProvider>
+            <Nav backend={backend} mail={mail} />
+            <main className="container">{children}</main>
+            <footer className="site-footer">
+              <span>SignFlow · SHA-256 Cryptographic Ledger · Connected Team Workspace</span>
+              <span>100% Original Color Scanner · iOS Minimalist Edition</span>
+            </footer>
+          </AuthProvider>
         </ToastProvider>
       </body>
     </html>
