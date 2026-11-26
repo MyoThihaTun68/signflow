@@ -5,13 +5,12 @@ import { randomRefCode, randomToken, sha256Hex } from '@/lib/server/crypto';
 import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from '@/lib/server/http';
 import { sendMail, signRequestEmail } from '@/lib/server/mailer';
 import { drawRefFooter } from '@/lib/pdf/stamp';
-import type { OrgRole } from '@/lib/types';
+import { normalizeRole, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_PDF_BYTES = 4.3 * 1024 * 1024;
-const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 export async function POST(req: Request) {
   let form: FormData;
@@ -27,10 +26,8 @@ export async function POST(req: Request) {
   const signer1Email = cleanText(form.get('signer1Email'), 254).toLowerCase() || null;
   const signer2Name = cleanText(form.get('signer2Name'), 120) || null;
   const signer2Email = cleanText(form.get('signer2Email'), 254).toLowerCase();
-  const senderRoleRaw = cleanText(form.get('senderRole'), 32) as OrgRole;
-  const assignedRoleRaw = cleanText(form.get('assignedRole'), 32) as OrgRole;
-  const senderRole: OrgRole = ROLES.includes(senderRoleRaw) ? senderRoleRaw : 'hr';
-  const assignedRole: OrgRole = ROLES.includes(assignedRoleRaw) ? assignedRoleRaw : 'director';
+  const senderRole: OrgRole = normalizeRole(form.get('senderRole'), 'hr');
+  const assignedRole: OrgRole = normalizeRole(form.get('assignedRole'), 'director');
   const requireOtp = form.get('requireOtp') === 'true' || form.get('requireOtp') === '1';
 
   if (!(file instanceof Blob) || file.size === 0) return jsonError('A PDF file is required.');

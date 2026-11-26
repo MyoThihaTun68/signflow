@@ -4,9 +4,11 @@ export type AuditEventType = 'created' | 'sent' | 'viewed' | 'otp_verified' | 's
 
 export type Decision = 'approved' | 'approved_with_notes' | 'rejected';
 
-export type OrgRole = 'hr' | 'director' | 'boss' | 'manager' | 'finance' | 'external';
+export type OrgRole = string;
 
-export const ORG_ROLE_LABELS: Record<OrgRole, string> = {
+export const DEFAULT_ROLES: string[] = ['director', 'boss', 'hr', 'finance'];
+
+export const ORG_ROLE_LABELS: Record<string, string> = {
   hr: 'HR',
   director: 'Director',
   boss: 'Boss',
@@ -14,6 +16,26 @@ export const ORG_ROLE_LABELS: Record<OrgRole, string> = {
   finance: 'Finance',
   external: 'External Partner',
 };
+
+/** Formats any built-in or user-created custom role cleanly (e.g. "it_manager" or "Legal Counsel" -> "Legal Counsel"). */
+export function roleLabel(role: string | null | undefined): string {
+  if (!role) return 'Team';
+  const clean = role.trim();
+  const key = clean.toLowerCase();
+  if (ORG_ROLE_LABELS[key]) return ORG_ROLE_LABELS[key];
+  return clean
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function normalizeRole(input: unknown, fallback = 'director'): string {
+  if (typeof input !== 'string') return fallback;
+  const trimmed = input.trim().slice(0, 40);
+  if (!trimmed) return fallback;
+  const lower = trimmed.toLowerCase();
+  if (ORG_ROLE_LABELS[lower]) return lower;
+  return trimmed;
+}
 
 export interface TeamMember {
   id: string;

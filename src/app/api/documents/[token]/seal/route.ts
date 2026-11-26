@@ -10,7 +10,8 @@ import { formatUtc } from '@/lib/pdf/certificate';
 import { DECISION_COLORS, dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
 import {
   DECISION_LABELS,
-  ORG_ROLE_LABELS,
+  normalizeRole,
+  roleLabel,
   type Decision,
   type OrgRole,
   type SignerHistoryEntry,
@@ -20,8 +21,6 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
-
-const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 interface SealBody {
   signature?: unknown;
@@ -66,12 +65,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const note = cleanText(body.note, 600) || null;
   const signerName = cleanText(body.signerName, 120) || doc.signer2_name || doc.signer2_email || 'Team Signer';
   const signerEmail = cleanText(body.signerEmail, 254).toLowerCase() || doc.signer2_email || 'signer@signflow.org';
-  const roleRaw = cleanText(body.signerRole, 32) as OrgRole;
-  const signerRole: OrgRole = ROLES.includes(roleRaw) ? roleRaw : doc.stamp_config?.assigned_role || 'director';
+  const signerRole: OrgRole = normalizeRole(body.signerRole, doc.stamp_config?.assigned_role || 'director');
   const signature = typeof body.signature === 'string' ? body.signature : '';
 
-  const forwardRoleRaw = cleanText(body.forwardToRole, 32) as OrgRole;
-  const forwardToRole: OrgRole | null = ROLES.includes(forwardRoleRaw) ? forwardRoleRaw : null;
+  const forwardRoleRaw = cleanText(body.forwardToRole, 40);
+  const forwardToRole: OrgRole | null = forwardRoleRaw ? normalizeRole(forwardRoleRaw) : null;
   const forwardToName = cleanText(body.forwardToName, 120) || null;
   const forwardToEmail = cleanText(body.forwardToEmail, 254).toLowerCase() || null;
   const isForwarding = Boolean(forwardToRole && decision !== 'rejected');
@@ -100,7 +98,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const pageIndex = Math.floor(page);
   if (pageIndex >= pdf.getPageCount()) return jsonError('Page out of range.');
 
-  const roleBadge = ORG_ROLE_LABELS[signerRole].toUpperCase();
+  const roleBadge = roleLabel(signerRole).toUpperCase();
   let stamp;
   try {
     stamp = await drawStamp(pdf, pageIndex, dataUrlToBytes(signature), { cx, cy, widthFrac }, [
@@ -183,8 +181,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   });
 
   if (isForwarding && forwardToRole) {
-    const nextEmail = forwardToEmail || `${forwardToRole}@signflow.org`;
-    const nextName = forwardToName || ORG_ROLE_LABELS[forwardToRole];
+    const nextEmail = forwardToEmail || `${forwardToRole.toLowerCase().replace(/\s+/g, '.')}@signflow.org`;
+    const nextName = forwardToName || roleLabel(forwardToRole);
     const stampConfig: StampConfig = {
       ...doc.stamp_config,
       page: pageIndex,
@@ -214,7 +212,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
         signRequestEmail({
           to: nextEmail,
           signer2Name: nextName,
-          signer1Name: `${signerName} (${ORG_ROLE_LABELS[signerRole]})`,
+          signer1Name: `${signerName} (${roleLabel(signerRole)})`,
           signer1Email: signerEmail,
           title: doc.title,
           refCode: doc.ref_code,

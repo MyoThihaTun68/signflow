@@ -9,12 +9,10 @@ import {
   registerOrActivateMember,
   verifyInviteToken,
 } from '@/lib/server/team';
-import { ORG_ROLE_LABELS, type OrgRole } from '@/lib/types';
+import { normalizeRole, roleLabel, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 function makeCookieHeader(req: Request, value: string, maxAge: number): string {
   const isHttps = new URL(req.url).protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https';
@@ -105,10 +103,9 @@ export async function POST(req: Request) {
   const inviteToken = typeof body.inviteToken === 'string' ? body.inviteToken : '';
   const invite = inviteToken ? verifyInviteToken(inviteToken) : null;
 
-  const roleRaw = cleanText(body.role, 32) as OrgRole;
-  const role: OrgRole = invite ? invite.role : ROLES.includes(roleRaw) ? roleRaw : 'hr';
+  const role: OrgRole = invite ? invite.role : normalizeRole(body.role, 'hr');
   const name = cleanText(body.name, 120) || invite?.name || email.split('@')[0];
-  const department = cleanText(body.department, 100) || invite?.department || ORG_ROLE_LABELS[role];
+  const department = cleanText(body.department, 100) || invite?.department || roleLabel(role);
 
   try {
     const { member, roster } = await registerOrActivateMember({

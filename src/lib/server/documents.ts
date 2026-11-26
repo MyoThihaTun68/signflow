@@ -1,7 +1,7 @@
 import 'server-only';
 import {
   EVENT_LABELS,
-  ORG_ROLE_LABELS,
+  roleLabel,
   type AuditEvent,
   type DocumentComment,
   type DocumentRecord,
@@ -57,11 +57,11 @@ export function toPublicEvents(events: AuditEvent[]): PublicAuditEvent[] {
       label = 'Commented';
       detail = meta.message;
     } else if (meta.kind === 'forwarded') {
-      const toRole = typeof meta.to_role === 'string' ? ORG_ROLE_LABELS[meta.to_role as OrgRole] || meta.to_role : '';
+      const toRole = typeof meta.to_role === 'string' ? roleLabel(meta.to_role) : '';
       label = `Forwarded to ${toRole || meta.to_email || 'Next Signer'}`;
       detail = typeof meta.note === 'string' ? meta.note : null;
     } else if (e.event_type === 'signed') {
-      const roleStr = typeof meta.actor_role === 'string' ? ORG_ROLE_LABELS[meta.actor_role as OrgRole] : '';
+      const roleStr = typeof meta.actor_role === 'string' ? roleLabel(meta.actor_role) : '';
       const dec = typeof meta.decision === 'string' ? meta.decision.replace(/_/g, ' ').toUpperCase() : 'SIGNED';
       label = roleStr ? `${roleStr} Signed (${dec})` : `Signed (${dec})`;
       detail = typeof meta.note === 'string' ? meta.note : null;

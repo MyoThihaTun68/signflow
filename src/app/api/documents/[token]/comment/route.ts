@@ -1,12 +1,10 @@
 import { getRepo } from '@/lib/server/db';
 import { extractComments, findByToken, toPublicEvents } from '@/lib/server/documents';
 import { cleanText, clientIp, jsonError, userAgent } from '@/lib/server/http';
-import type { OrgRole } from '@/lib/types';
+import { normalizeRole, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const ROLES: OrgRole[] = ['hr', 'director', 'boss', 'manager', 'finance', 'external'];
 
 /** Adds a team chat comment / note to the document's live thread. */
 export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }) {
@@ -24,8 +22,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   if (!message) return jsonError('Enter a message.');
   const authorName = cleanText(body.authorName, 120) || 'Team Member';
   const authorEmail = cleanText(body.authorEmail, 254).toLowerCase() || doc.signer2_email || 'team@signflow.org';
-  const roleRaw = cleanText(body.authorRole, 32) as OrgRole;
-  const authorRole: OrgRole = ROLES.includes(roleRaw) ? roleRaw : 'director';
+  const authorRole: OrgRole = normalizeRole(body.authorRole, 'director');
 
   const repo = getRepo();
   await repo.addEvent({

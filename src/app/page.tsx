@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CameraModal } from '@/components/CameraModal';
 import { useAuth } from '@/components/AuthProvider';
 import { QrCodeSvg } from '@/components/QrCodeSvg';
+import { RolePicker } from '@/components/RolePicker';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
 import {
@@ -32,7 +33,7 @@ import { rasterizePdf } from '@/lib/client/pdfjs';
 import { buildScanPdf, downloadBytes, slugify } from '@/lib/client/buildPdf';
 import { generateSamplePaperBlob } from '@/lib/client/samplePaper';
 import { sha256Hex } from '@/lib/client/sha256';
-import { ORG_ROLE_LABELS, type OrgRole, type TeamMember } from '@/lib/types';
+import { roleLabel, type OrgRole, type TeamMember } from '@/lib/types';
 
 type Handle = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'w' | 'e';
 
@@ -107,12 +108,15 @@ export default function ScanPreparePage() {
 
   const pickAssignedRole = (role: OrgRole) => {
     setAssignedRole(role);
-    const match = roster.find((m) => m.role === role);
+    const match = roster.find((m) => m.role.toLowerCase() === role.toLowerCase());
     if (match) {
       setSigner2Name(match.name);
       setSigner2Email(match.email);
+    } else {
+      setSigner2Name(roleLabel(role));
+      setSigner2Email(`${role.toLowerCase().replace(/\s+/g, '.')}@signflow.org`);
     }
-    setRequireOtp(role === 'external');
+    setRequireOtp(role.toLowerCase() === 'external');
   };
 
   const addImageBlob = useCallback(async (blob: Blob, name: string): Promise<ScanPage> => {
@@ -378,7 +382,7 @@ export default function ScanPreparePage() {
       if (!res.ok) throw new Error(data.error || 'Failed to create signing link.');
       setProgress(100);
       setCreated({ ...data, pdfBytes });
-      toast(`Sent to ${ORG_ROLE_LABELS[assignedRole]} (${data.refCode})!`, 'ok');
+      toast(`Sent to ${roleLabel(assignedRole)} (${data.refCode})!`, 'ok');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -426,7 +430,7 @@ export default function ScanPreparePage() {
               <span className="badge badge-ok">✓ Ready to Sign</span>
               <h2>
                 {title || 'Document'} · <code>{created.refCode}</code> → Assigned to{' '}
-                <strong>{ORG_ROLE_LABELS[assignedRole]}</strong>
+                <strong>{roleLabel(assignedRole)}</strong>
               </h2>
             </div>
             <button type="button" className="btn btn-sm" onClick={() => setCreated(null)}>
@@ -714,19 +718,13 @@ export default function ScanPreparePage() {
               </label>
 
               <div className="field">
-                <span>Who Should Sign This Next? (Click 1 Role)</span>
-                <div className="seg full">
-                  {(['director', 'boss', 'hr', 'finance'] as OrgRole[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      className={assignedRole === r ? 'active' : ''}
-                      onClick={() => pickAssignedRole(r)}
-                    >
-                      {ORG_ROLE_LABELS[r]}
-                    </button>
-                  ))}
-                </div>
+                <span>Who Should Sign This Next? (Director / Boss / HR / Finance or + Custom)</span>
+                <RolePicker
+                  value={assignedRole}
+                  onChange={pickAssignedRole}
+                  extraRoles={roster.map((m) => m.role)}
+                  allowDeleteCustom
+                />
               </div>
 
               <div className="fields-2">
@@ -791,7 +789,7 @@ export default function ScanPreparePage() {
                     <span className="spinner" /> {busy}
                   </>
                 ) : (
-                  `Send to ${ORG_ROLE_LABELS[assignedRole]} for Signing →`
+                  `Send to ${roleLabel(assignedRole)} for Signing →`
                 )}
               </button>
 

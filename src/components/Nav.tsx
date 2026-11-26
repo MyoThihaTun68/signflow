@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { ORG_ROLE_LABELS } from '@/lib/types';
+import { roleLabel } from '@/lib/types';
 
 type SchemeMode = 'system' | 'light' | 'dark';
 type AccentId = 'blue' | 'indigo' | 'emerald' | 'amber' | 'rose';
@@ -177,7 +177,7 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
                 style={{ padding: '5px 11px', textDecoration: 'none' }}
               >
                 <span className="badge-dot" />
-                {ORG_ROLE_LABELS[user.role]} · {user.name.split(' (')[0]}
+                {roleLabel(user.role)} · {user.name.split(' (')[0]}
               </Link>
               <button
                 type="button"

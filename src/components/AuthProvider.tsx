@@ -1,8 +1,9 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { RolePicker } from '@/components/RolePicker';
 import { useToast } from '@/components/Toast';
-import { ORG_ROLE_LABELS, type OrgRole, type TeamMember } from '@/lib/types';
+import { roleLabel, type OrgRole, type TeamMember } from '@/lib/types';
 
 interface InviteInfo {
   email: string;
@@ -113,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: email.trim(),
           password,
           role,
-          department: department.trim() || ORG_ROLE_LABELS[role],
+          department: department.trim() || roleLabel(role),
           inviteToken: inviteToken || undefined,
         }),
       });
@@ -125,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setInviteToken('');
       toast(
         mode === 'register'
-          ? `Account created! Signed in as ${data.user.name} (${ORG_ROLE_LABELS[data.user.role as OrgRole]})`
+          ? `Account created! Signed in as ${data.user.name} (${roleLabel(data.user.role)})`
           : `Welcome back, ${data.user.name}!`,
         'ok',
       );
@@ -203,19 +204,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   </label>
 
                   <div className="field">
-                    <span>Your Organization Role</span>
-                    <div className="seg full">
-                      {(['hr', 'director', 'boss', 'manager', 'finance'] as OrgRole[]).map((r) => (
-                        <button
-                          key={r}
-                          type="button"
-                          className={role === r ? 'active' : ''}
-                          onClick={() => setRole(r)}
-                        >
-                          {ORG_ROLE_LABELS[r]}
-                        </button>
-                      ))}
-                    </div>
+                    <span>Your Organization Role (or click + Custom to add your own)</span>
+                    <RolePicker
+                      value={role}
+                      onChange={setRole}
+                      extraRoles={roster.map((m) => m.role)}
+                      allowDeleteCustom
+                    />
                   </div>
                 </>
               )}
@@ -252,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   <span>Department / Title (optional)</span>
                   <input
                     className="input"
-                    placeholder={`e.g. ${ORG_ROLE_LABELS[role]} Department`}
+                    placeholder={`e.g. ${roleLabel(role)} Department`}
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
                   />

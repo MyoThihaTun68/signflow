@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { RolePicker, useCustomRoles } from '@/components/RolePicker';
 import { useToast } from '@/components/Toast';
 import {
-  ORG_ROLE_LABELS,
+  roleLabel,
   type Decision,
   type DocumentStatus,
   type OrgRole,
@@ -48,6 +49,7 @@ export default function TeamHubPage() {
 
   const [roleFilter, setRoleFilter] = useState<'all' | OrgRole>('all');
   const [viewTab, setViewTab] = useState<'papers' | 'members' | 'history'>('papers');
+  const { allRoles } = useCustomRoles(roster.map((m) => m.role));
 
   // Simple Invite Form
   const [newName, setNewName] = useState('');
@@ -86,7 +88,7 @@ export default function TeamHubPage() {
           name: newName.trim(),
           email: newEmail.trim(),
           role: newRole,
-          department: ORG_ROLE_LABELS[newRole],
+          department: roleLabel(newRole),
           sendInvite: true,
         }),
       });
@@ -99,7 +101,7 @@ export default function TeamHubPage() {
       if (data.inviteUrl) {
         await navigator.clipboard.writeText(data.inviteUrl).catch(() => undefined);
       }
-      toast(`Invited ${ORG_ROLE_LABELS[newRole]} (invite link copied to clipboard!)`, 'ok');
+      toast(`Invited ${roleLabel(newRole)} (invite link copied to clipboard!)`, 'ok');
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to invite member', 'err');
     } finally {
@@ -143,7 +145,7 @@ export default function TeamHubPage() {
           <div className="row">
             <span className="badge badge-ok">✓ Signed In</span>
             <strong>{user.name}</strong>
-            <span className="badge badge-primary">{ORG_ROLE_LABELS[user.role]}</span>
+            <span className="badge badge-primary">{roleLabel(user.role)}</span>
             <span className="muted small">({user.email})</span>
           </div>
           <div className="row">
@@ -152,7 +154,7 @@ export default function TeamHubPage() {
               className="btn btn-sm"
               onClick={() => setRoleFilter(roleFilter === user.role ? 'all' : user.role)}
             >
-              {roleFilter === user.role ? 'Show All Team Papers' : `Show Only My ${ORG_ROLE_LABELS[user.role]} Papers`}
+              {roleFilter === user.role ? 'Show All Team Papers' : `Show Only My ${roleLabel(user.role)} Papers`}
             </button>
             <Link href="/" className="btn btn-primary btn-sm">
               + Upload New Paper
@@ -162,7 +164,7 @@ export default function TeamHubPage() {
       ) : (
         <div className="card card-hero row-between">
           <div>
-            <h2>Team Workspace (HR · Director · Boss)</h2>
+            <h2>Team Workspace (Director · Boss · HR · Finance + Custom Roles)</h2>
             <p className="muted small">
               First time? Click <strong>Create Account</strong> with your email. Already have an account? Click{' '}
               <strong>Sign In</strong>.
@@ -210,9 +212,9 @@ export default function TeamHubPage() {
             <button type="button" className={roleFilter === 'all' ? 'active' : ''} onClick={() => setRoleFilter('all')}>
               All
             </button>
-            {(['hr', 'director', 'boss'] as OrgRole[]).map((r) => (
-              <button key={r} type="button" className={roleFilter === r ? 'active' : ''} onClick={() => setRoleFilter(r)}>
-                {ORG_ROLE_LABELS[r]}
+            {allRoles.map((r) => (
+              <button key={r} type="button" className={roleFilter.toLowerCase() === r.toLowerCase() ? 'active' : ''} onClick={() => setRoleFilter(r)}>
+                {roleLabel(r)}
               </button>
             ))}
           </div>
@@ -229,7 +231,7 @@ export default function TeamHubPage() {
           ) : filteredDocs.length === 0 ? (
             <div className="stack" style={{ padding: '28px 0', textAlign: 'center' }}>
               <h3>No papers yet</h3>
-              <p className="muted small">Upload or scan a paper to send it to Director, Boss, or HR.</p>
+              <p className="muted small">Upload or scan a paper to send it to Director, Boss, HR, Finance, or any custom role.</p>
               <div>
                 <Link href="/" className="btn btn-primary">
                   + Upload / Scan First Paper
@@ -258,23 +260,23 @@ export default function TeamHubPage() {
                       ) : d.status === 'rejected' ? (
                         <span className="badge badge-danger">✕ Rejected</span>
                       ) : (
-                        <span className="badge badge-warn">⏳ Waiting for {ORG_ROLE_LABELS[d.assignedRole]}</span>
+                        <span className="badge badge-warn">⏳ Waiting for {roleLabel(d.assignedRole)}</span>
                       )}
                     </div>
 
                     {/* Visual Step Chain: Who Prepared -> Who Signed -> Who is Next */}
                     <div className="row small">
                       <span className="badge badge-muted">
-                        From {ORG_ROLE_LABELS[d.senderRole]} ({d.signer1Name || d.signer1Email})
+                        From {roleLabel(d.senderRole)} ({d.signer1Name || d.signer1Email})
                       </span>
                       {d.signatures.map((s, idx) => (
                         <span key={idx} className="badge badge-ok">
-                          → ✓ {ORG_ROLE_LABELS[s.actorRole]} ({s.actorName})
+                          → ✓ {roleLabel(s.actorRole)} ({s.actorName})
                         </span>
                       ))}
                       {d.status === 'pending_cosign' && (
                         <span className="badge badge-primary">
-                          → Next: {ORG_ROLE_LABELS[d.assignedRole]} ({d.signer2Name || d.signer2Email})
+                          → Next: {roleLabel(d.assignedRole)} ({d.signer2Name || d.signer2Email})
                         </span>
                       )}
                     </div>
@@ -313,7 +315,7 @@ export default function TeamHubPage() {
                   }}
                 >
                   <div className="row">
-                    <span className="badge badge-primary">{ORG_ROLE_LABELS[m.role]}</span>
+                    <span className="badge badge-primary">{roleLabel(m.role)}</span>
                     <div>
                       <strong>{m.name}</strong>
                       <div className="small muted">{m.email}</div>
@@ -373,19 +375,13 @@ export default function TeamHubPage() {
                 />
               </label>
               <div className="field">
-                <span>Role</span>
-                <div className="seg full">
-                  {(['hr', 'director', 'boss', 'finance'] as OrgRole[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      className={newRole === r ? 'active' : ''}
-                      onClick={() => setNewRole(r)}
-                    >
-                      {ORG_ROLE_LABELS[r]}
-                    </button>
-                  ))}
-                </div>
+                <span>Role (Director / Boss / HR / Finance or + Custom)</span>
+                <RolePicker
+                  value={newRole}
+                  onChange={setNewRole}
+                  extraRoles={roster.map((m) => m.role)}
+                  allowDeleteCustom
+                />
               </div>
               <button type="submit" className="btn btn-primary btn-block" disabled={savingMember}>
                 {savingMember ? 'Inviting...' : '+ Send Email Invite & Copy Link'}
@@ -407,7 +403,7 @@ export default function TeamHubPage() {
                 <li key={i} className={ev.type}>
                   <div className="row" style={{ gap: 8 }}>
                     <span className="t-title">{ev.label}</span>
-                    {ev.actorRole && <span className="badge badge-primary">{ORG_ROLE_LABELS[ev.actorRole]}</span>}
+                    {ev.actorRole && <span className="badge badge-primary">{roleLabel(ev.actorRole)}</span>}
                     {ev.signToken && (
                       <Link href={`/sign/${ev.signToken}`} className="badge badge-muted">
                         {ev.refCode} · {ev.documentTitle}

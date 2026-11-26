@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { PdfCanvasViewer } from '@/components/PdfCanvasViewer';
+import { RolePicker, useCustomRoles } from '@/components/RolePicker';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
 import {
   DECISION_LABELS,
-  ORG_ROLE_LABELS,
+  roleLabel,
   type Decision,
   type OrgRole,
   type PublicDocument,
@@ -40,9 +41,10 @@ export function CoSignWorkspace({ token }: { token: string }) {
   const [signerEmail, setSignerEmail] = useState('');
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
 
-  // Easy 1-click routing: either "Finish & Complete" or "Send Next to Boss/Director"
+  // Easy 1-click routing: either "Finish & Complete" or "Send Next to <Role>"
   const [nextTarget, setNextTarget] = useState<'finish' | OrgRole>('finish');
   const [showHistory, setShowHistory] = useState(false);
+  const { allRoles } = useCustomRoles(roster.map((m) => m.role));
 
   const [sealing, setSealing] = useState(false);
   const [sealErr, setSealErr] = useState<string | null>(null);
@@ -104,10 +106,13 @@ export function CoSignWorkspace({ token }: { token: string }) {
 
   const switchActiveRole = (role: OrgRole) => {
     setSignerRole(role);
-    const match = roster.find((m) => m.role === role);
+    const match = roster.find((m) => m.role.toLowerCase() === role.toLowerCase());
     if (match) {
       setSignerName(match.name);
       setSignerEmail(match.email);
+    } else if (!user) {
+      setSignerName(roleLabel(role));
+      setSignerEmail(`${role.toLowerCase().replace(/\s+/g, '.')}@signflow.org`);
     }
   };
 
@@ -119,7 +124,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
     setSealErr(null);
     try {
       const forwardRole = nextTarget !== 'finish' && decision !== 'rejected' ? nextTarget : null;
-      const forwardMember = forwardRole ? roster.find((m) => m.role === forwardRole) : null;
+      const forwardMember = forwardRole ? roster.find((m) => m.role.toLowerCase() === forwardRole.toLowerCase()) : null;
 
       const res = await fetch(`/api/documents/${token}/seal`, {
         method: 'POST',
@@ -132,12 +137,13 @@ export function CoSignWorkspace({ token }: { token: string }) {
           widthFrac,
           decision,
           note: note.trim() || null,
-          signerName: signerName.trim() || ORG_ROLE_LABELS[signerRole],
-          signerEmail: signerEmail.trim() || `${signerRole}@signflow.org`,
+          signerName: signerName.trim() || roleLabel(signerRole),
+          signerEmail: signerEmail.trim() || `${signerRole.toLowerCase().replace(/\s+/g, '.')}@signflow.org`,
           signerRole,
           forwardToRole: forwardRole,
-          forwardToName: forwardMember?.name || (forwardRole ? ORG_ROLE_LABELS[forwardRole] : null),
-          forwardToEmail: forwardMember?.email || (forwardRole ? `${forwardRole}@signflow.org` : null),
+          forwardToName: forwardMember?.name || (forwardRole ? roleLabel(forwardRole) : null),
+          forwardToEmail:
+            forwardMember?.email || (forwardRole ? `${forwardRole.toLowerCase().replace(/\s+/g, '.')}@signflow.org` : null),
         }),
       });
       const data = await res.json();
@@ -150,7 +156,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
           setNextTarget('finish');
           setSignaturePng(null);
           setNote('');
-          toast(`Stamped & sent to ${ORG_ROLE_LABELS[data.forwardedToRole as OrgRole]}!`, 'ok');
+          toast(`Stamped & sent to ${roleLabel(data.forwardedToRole)}!`, 'ok');
         } else {
           toast('Paper signed & completed!', 'ok');
         }
@@ -177,8 +183,8 @@ export function CoSignWorkspace({ token }: { token: string }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          authorName: signerName || ORG_ROLE_LABELS[signerRole],
-          authorEmail: signerEmail || `${signerRole}@signflow.org`,
+          authorName: signerName || roleLabel(signerRole),
+          authorEmail: signerEmail || `${signerRole.toLowerCase().replace(/\s+/g, '.')}@signflow.org`,
           authorRole: signerRole,
           message: chatText.trim(),
         }),
@@ -229,15 +235,15 @@ export function CoSignWorkspace({ token }: { token: string }) {
           <code>{doc.refCode}</code>
           <strong style={{ fontSize: '1.05rem' }}>{doc.title}</strong>
           <span className="muted">·</span>
-          <span className="badge badge-muted">Prepared by {ORG_ROLE_LABELS[doc.senderRole]}</span>
+          <span className="badge badge-muted">Prepared by {roleLabel(doc.senderRole)}</span>
           <span>→</span>
           {doc.signatures.map((s, i) => (
             <span key={i} className="badge badge-ok">
-              ✓ {ORG_ROLE_LABELS[s.actorRole]} Signed
+              ✓ {roleLabel(s.actorRole)} Signed
             </span>
           ))}
           {!isDone ? (
-            <span className="badge badge-warn">⏳ Waiting for {ORG_ROLE_LABELS[doc.assignedRole]}</span>
+            <span className="badge badge-warn">⏳ Waiting for {roleLabel(doc.assignedRole)}</span>
           ) : (
             <span className={`badge ${doc.status === 'rejected' ? 'badge-danger' : 'badge-ok'}`}>
               {doc.status === 'rejected' ? '✕ Rejected' : '✓ Completed'}
@@ -289,7 +295,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
                       cy: stampPos.cy,
                       widthFrac,
                       png: signaturePng,
-                      caption: `${ORG_ROLE_LABELS[signerRole].toUpperCase()} · ${DECISION_LABELS[decision].toUpperCase()}`,
+                      caption: `${roleLabel(signerRole).toUpperCase()} · ${DECISION_LABELS[decision].toUpperCase()}`,
                       captionColor: DECISION_HEX[decision],
                     }
                   : null
@@ -320,7 +326,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
                   >
                     <div className="row-between">
                       <div className="row" style={{ gap: 6 }}>
-                        <span className="badge badge-primary">{ORG_ROLE_LABELS[c.authorRole]}</span>
+                        <span className="badge badge-primary">{roleLabel(c.authorRole)}</span>
                         <strong>{c.authorName}</strong>
                       </div>
                       <span className="small muted">
@@ -336,7 +342,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
             <form className="copy-field" onSubmit={postComment}>
               <input
                 className="input"
-                placeholder={`Write a message to HR / Director / Boss as ${ORG_ROLE_LABELS[signerRole]}...`}
+                placeholder={`Write a message to team as ${roleLabel(signerRole)}...`}
                 value={chatText}
                 onChange={(e) => setChatText(e.target.value)}
               />
@@ -351,7 +357,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
                   <li key={i} className={ev.type}>
                     <div className="row" style={{ gap: 6 }}>
                       <span className="t-title">{ev.label}</span>
-                      {ev.actorRole && <span className="badge badge-primary">{ORG_ROLE_LABELS[ev.actorRole]}</span>}
+                      {ev.actorRole && <span className="badge badge-primary">{roleLabel(ev.actorRole)}</span>}
                     </div>
                     {ev.detail && <div className="small">&ldquo;{ev.detail}&rdquo;</div>}
                     <div className="t-meta">
@@ -372,7 +378,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
             <div className="card card-hero stack">
               <h2>✓ Paper Completed</h2>
               <p className="muted small">
-                Signed by {doc.signatures.map((s) => `${ORG_ROLE_LABELS[s.actorRole]} (${s.actorName})`).join(' → ')}.
+                Signed by {doc.signatures.map((s) => `${roleLabel(s.actorRole)} (${s.actorName})`).join(' → ')}.
               </p>
               <a className="btn btn-primary btn-lg btn-block" href={`/api/documents/${token}/file?type=final&download=1`}>
                 Download Signed PDF
@@ -396,21 +402,15 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 )}
               </div>
 
-              {/* 1. Who are you signing as? */}
+              {/* 1. Who are you signing as? (Director / Boss / HR / Finance + Custom) */}
               <div className="field">
-                <span>1. Your Role</span>
-                <div className="seg full">
-                  {(['director', 'boss', 'hr', 'finance'] as OrgRole[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      className={signerRole === r ? 'active' : ''}
-                      onClick={() => switchActiveRole(r)}
-                    >
-                      {ORG_ROLE_LABELS[r]}
-                    </button>
-                  ))}
-                </div>
+                <span>1. Your Role (Director / Boss / HR / Finance or + Custom)</span>
+                <RolePicker
+                  value={signerRole}
+                  onChange={switchActiveRole}
+                  extraRoles={roster.map((m) => m.role)}
+                  allowDeleteCustom
+                />
               </div>
 
               <div className="fields-2">
@@ -462,7 +462,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 />
               </label>
 
-              {/* 3. Finish or Pass to Boss? */}
+              {/* 3. Finish or Pass to Another Role? */}
               {decision !== 'rejected' && (
                 <div className="field">
                   <span>3. After You Sign:</span>
@@ -474,20 +474,19 @@ export function CoSignWorkspace({ token }: { token: string }) {
                     >
                       ✓ Finish &amp; Complete
                     </button>
-                    <button
-                      type="button"
-                      className={nextTarget === 'boss' ? 'active' : ''}
-                      onClick={() => setNextTarget('boss')}
-                    >
-                      → Send Next to Boss
-                    </button>
-                    <button
-                      type="button"
-                      className={nextTarget === 'director' ? 'active' : ''}
-                      onClick={() => setNextTarget('director')}
-                    >
-                      → Send to Director
-                    </button>
+                    {allRoles
+                      .filter((r) => r.toLowerCase() !== signerRole.toLowerCase())
+                      .slice(0, 3)
+                      .map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          className={nextTarget === r ? 'active' : ''}
+                          onClick={() => setNextTarget(r)}
+                        >
+                          → Next: {roleLabel(r)}
+                        </button>
+                      ))}
                   </div>
                 </div>
               )}
@@ -503,8 +502,8 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 {sealing
                   ? 'Stamping Paper...'
                   : nextTarget !== 'finish' && decision !== 'rejected'
-                    ? `Stamp & Send Next to ${ORG_ROLE_LABELS[nextTarget]} →`
-                    : `Stamp as ${ORG_ROLE_LABELS[signerRole]} & Complete ✓`}
+                    ? `Stamp & Send Next to ${roleLabel(nextTarget)} →`
+                    : `Stamp as ${roleLabel(signerRole)} & Complete ✓`}
               </button>
             </div>
           )}
