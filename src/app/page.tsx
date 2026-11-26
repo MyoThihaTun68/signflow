@@ -52,13 +52,13 @@ interface CreatedDoc {
 
 export default function ScanPreparePage() {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, openAuthModal } = useAuth();
   const [pages, setPages] = useState<ScanPage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [output, setOutput] = useState<OutputSettings>(DEFAULT_OUTPUT);
   const [adjustingCrop, setAdjustingCrop] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
-  const [compareOrig, setCompareOrig] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -88,7 +88,6 @@ export default function ScanPreparePage() {
 
   const active = pages.find((p) => p.id === activeId) ?? pages[0] ?? null;
 
-  // Load saved team roster so HR / Director / Boss can be picked in 1 click
   useEffect(() => {
     fetch('/api/team', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
@@ -98,7 +97,6 @@ export default function ScanPreparePage() {
       .catch(() => undefined);
   }, []);
 
-  // Automatically sync Sender fields when a user signs in
   useEffect(() => {
     if (user) {
       setSenderRole(user.role);
@@ -107,15 +105,6 @@ export default function ScanPreparePage() {
     }
   }, [user]);
 
-  const pickSenderRole = (role: OrgRole) => {
-    setSenderRole(role);
-    const match = roster.find((m) => m.role === role);
-    if (match) {
-      setSigner1Name(match.name);
-      setSigner1Email(match.email);
-    }
-  };
-
   const pickAssignedRole = (role: OrgRole) => {
     setAssignedRole(role);
     const match = roster.find((m) => m.role === role);
@@ -123,11 +112,9 @@ export default function ScanPreparePage() {
       setSigner2Name(match.name);
       setSigner2Email(match.email);
     }
-    if (role === 'external') setRequireOtp(true);
-    else setRequireOtp(false);
+    setRequireOtp(role === 'external');
   };
 
-  // ── Import images & PDFs ──
   const addImageBlob = useCallback(async (blob: Blob, name: string): Promise<ScanPage> => {
     const src = URL.createObjectURL(blob);
     const img = await loadImage(src);
@@ -160,13 +147,13 @@ export default function ScanPreparePage() {
           }
         }
         if (!added.length) {
-          setError('Choose image files (JPG, PNG, WebP, HEIC) or a PDF.');
+          setError('Choose image files (JPG, PNG, WebP) or a PDF.');
           return;
         }
         setPages((prev) => [...prev, ...added]);
         setActiveId((prev) => prev ?? added[0].id);
         if (!title && list[0]) setTitle(list[0].name.replace(/\.[^.]+$/, ''));
-        toast(`Added ${added.length} page${added.length > 1 ? 's' : ''} (original colors preserved)`, 'ok');
+        toast(`Loaded ${added.length} page${added.length > 1 ? 's' : ''}`, 'ok');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load file.');
       } finally {
@@ -176,7 +163,6 @@ export default function ScanPreparePage() {
     [addImageBlob, title, toast],
   );
 
-  // 1-Click Sample Paper Contract Demo
   const loadSamplePaper = async () => {
     setImporting(true);
     setError(null);
@@ -186,17 +172,12 @@ export default function ScanPreparePage() {
       setPages((prev) => [...prev, page]);
       setActiveId(page.id);
       if (!title) setTitle('Master Service & NDA Agreement');
-      if (!signer1Name) setSigner1Name('Alex Rivera');
-      if (!signer1Email) setSigner1Email('alex@signflow.cloud');
-      if (!signer2Name) setSigner2Name('Jordan Lee');
-      if (!signer2Email) setSigner2Email('jordan@client.org');
-      toast('Loaded sample color contract — try "Auto Trim Edges"!', 'info');
+      toast('Sample paper loaded — click "Create & Send" on the right!', 'info');
     } finally {
       setImporting(false);
     }
   };
 
-  // Support Ctrl+V / Cmd+V clipboard image paste anywhere on the page
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const files: File[] = [];
@@ -212,7 +193,6 @@ export default function ScanPreparePage() {
     return () => window.removeEventListener('paste', onPaste);
   }, [addFiles]);
 
-  // Clean up object URLs on unmount
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
   useEffect(
@@ -248,38 +228,8 @@ export default function ScanPreparePage() {
     const transformed = renderTransformed(img, active.edit, 900);
     const rect = autoTrim(transformed);
     updateEdit({ crop: rect });
-    toast('Edges auto-trimmed to document boundary', 'info');
+    toast('Auto-trimmed paper edges', 'info');
   }, [active, toast, updateEdit]);
-
-  const autoTrimAll = async () => {
-    for (const p of pages) {
-      const img = await loadImage(p.src);
-      const transformed = renderTransformed(img, p.edit, 900);
-      const rect = autoTrim(transformed);
-      setPages((prev) => prev.map((item) => (item.id === p.id ? { ...item, edit: { ...item.edit, crop: rect } } : item)));
-    }
-    toast(`Auto-trimmed all ${pages.length} page(s)`, 'ok');
-  };
-
-  // Keyboard shortcuts when not focused in an input
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !active) return;
-      if (e.key === 'r' || e.key === 'R') {
-        e.preventDefault();
-        rotateBy(e.shiftKey ? -90 : 90);
-      } else if (e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        runAutoTrim();
-      } else if (e.key === 'g' || e.key === 'G') {
-        e.preventDefault();
-        setShowGrid((g) => !g);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [active, rotateBy, runAutoTrim]);
 
   const removePage = (id: string) => {
     setPages((prev) => {
@@ -294,18 +244,6 @@ export default function ScanPreparePage() {
     });
   };
 
-  const movePage = (idx: number, dir: -1 | 1) => {
-    setPages((prev) => {
-      const to = idx + dir;
-      if (to < 0 || to >= prev.length) return prev;
-      const copy = [...prev];
-      const [item] = copy.splice(idx, 1);
-      copy.splice(to, 0, item);
-      return copy;
-    });
-  };
-
-  // ── Draw editor stage + live page preview ──
   useEffect(() => {
     let cancelled = false;
     if (!active) return;
@@ -313,15 +251,14 @@ export default function ScanPreparePage() {
       try {
         const img = await loadImage(active.src);
         if (cancelled) return;
-        const editToShow = compareOrig ? DEFAULT_EDIT : active.edit;
-        const transformed = renderTransformed(img, editToShow, 1300);
+        const transformed = renderTransformed(img, active.edit, 1300);
         const stage = stageCanvasRef.current;
         if (stage) {
           stage.width = transformed.width;
           stage.height = transformed.height;
           stage.getContext('2d')!.drawImage(transformed, 0, 0);
         }
-        const cropped = cropCanvas(transformed, editToShow.crop);
+        const cropped = cropCanvas(transformed, active.edit.crop);
         const { canvas: composed } = composePage(cropped, output);
         const preview = previewCanvasRef.current;
         if (preview) {
@@ -330,15 +267,14 @@ export default function ScanPreparePage() {
           preview.getContext('2d')!.drawImage(composed, 0, 0);
         }
       } catch {
-        // ignore transient load failures
+        // ignore
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [active, output, compareOrig]);
+  }, [active, output]);
 
-  // ── Interactive 4-corner + 4-edge crop box ──
   const startCropDrag = (handle: Handle) => (e: React.PointerEvent) => {
     if (!adjustingCrop || !active) return;
     e.stopPropagation();
@@ -376,7 +312,6 @@ export default function ScanPreparePage() {
     dragRef.current = null;
   };
 
-  // ── Generate PDF (client-side via pdf-lib) ──
   const buildPdfBytes = async (): Promise<Uint8Array> => {
     const rendered = [];
     for (let i = 0; i < pages.length; i++) {
@@ -385,7 +320,7 @@ export default function ScanPreparePage() {
     }
     const mark =
       includeMark && markPng
-        ? { png: markPng, name: signer1Name || signer1Email || 'Signer 1', position: markPos }
+        ? { png: markPng, name: signer1Name || signer1Email || 'Sender', position: markPos }
         : null;
     return buildScanPdf(rendered, title || 'Scanned document', mark);
   };
@@ -393,7 +328,7 @@ export default function ScanPreparePage() {
   const handleDownloadOnly = async () => {
     if (!pages.length) return;
     setError(null);
-    setBusy('Building clean PDF...');
+    setBusy('Building PDF...');
     setProgress(20);
     try {
       const bytes = await buildPdfBytes();
@@ -410,15 +345,15 @@ export default function ScanPreparePage() {
 
   const handleCreateAndSend = async () => {
     if (!pages.length) return setError('Add at least one page.');
-    if (!signer2Email.trim()) return setError('Enter Signer 2 email so we can send the signing link and OTP.');
-    if (includeMark && !markPng) return setError('Create your Signer 1 mark or uncheck "Add Signer 1 digital mark".');
+    if (!signer2Email.trim()) return setError('Enter the recipient email.');
+    if (includeMark && !markPng) return setError('Draw/Type your signature or uncheck "Sign before sending".');
 
     setError(null);
-    setBusy('Rendering pages & building PDF...');
+    setBusy('Preparing PDF...');
     setProgress(15);
     try {
       const pdfBytes = await buildPdfBytes();
-      setBusy('Computing SHA-256 & uploading to Supabase...');
+      setBusy('Saving to Team Hub...');
       setProgress(72);
       const clientSha = await sha256Hex(pdfBytes);
 
@@ -443,11 +378,11 @@ export default function ScanPreparePage() {
       if (!res.ok) throw new Error(data.error || 'Failed to create signing link.');
       setProgress(100);
       setCreated({ ...data, pdfBytes });
-      toast(`Signing link created (${data.refCode})`, 'ok');
+      toast(`Sent to ${ORG_ROLE_LABELS[assignedRole]} (${data.refCode})!`, 'ok');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
-      toast('Could not create signing link', 'err');
+      toast('Could not send document', 'err');
     } finally {
       setBusy(null);
       setProgress(0);
@@ -456,104 +391,72 @@ export default function ScanPreparePage() {
 
   const copyText = async (text: string, label: string) => {
     await navigator.clipboard.writeText(text);
-    toast(`${label} copied to clipboard`, 'ok');
+    toast(`${label} copied`, 'ok');
   };
 
   return (
     <div className="stack">
-      <div className="page-head">
-        <div>
-          <h1>Scan &amp; Prepare</h1>
-          <p>
-            Convert physical paper into a clean, full-color digital PDF. Crop, auto-trim, rotate and straighten pages,
-            then generate a tamper-evident signing link with one click.
-          </p>
+      {/* ── Easy 3-Step Visual Flow Header ── */}
+      <div className="card row-between" style={{ padding: '14px 20px' }}>
+        <div className="row" style={{ gap: 14 }}>
+          <span className="badge badge-primary" style={{ padding: '5px 12px', fontSize: '0.82rem' }}>
+            1. Upload / Scan Paper
+          </span>
+          <span className="muted">→</span>
+          <span className="badge badge-primary" style={{ padding: '5px 12px', fontSize: '0.82rem' }}>
+            2. Choose Who Signs (Director / Boss / HR)
+          </span>
+          <span className="muted">→</span>
+          <span className="badge badge-ok" style={{ padding: '5px 12px', fontSize: '0.82rem' }}>
+            3. Click &amp; Stamp (Done!)
+          </span>
         </div>
-        <div className="row">
-          <button type="button" className="btn" onClick={loadSamplePaper} disabled={importing}>
-            ✦ Load Sample Paper Contract
+        {!user && (
+          <button type="button" className="btn btn-sm" onClick={() => openAuthModal('login')}>
+            Sign In / Create Account
           </button>
-          <button type="button" className="btn" onClick={() => setCameraOpen(true)}>
-            Open Camera
-          </button>
-          <label className="btn btn-primary">
-            + Add Images / PDF
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              hidden
-              onChange={(e) => e.target.files && addFiles(e.target.files)}
-            />
-          </label>
-        </div>
+        )}
       </div>
 
+      {/* ── Success Card After Sending ── */}
       {created && (
         <div className="card card-hero stack">
           <div className="row-between">
             <div className="row">
-              <span className="badge badge-ok">✓ Registered &amp; Ready for Co-Sign</span>
+              <span className="badge badge-ok">✓ Ready to Sign</span>
               <h2>
-                {title || 'Scanned Document'} · <code>{created.refCode}</code>
+                {title || 'Document'} · <code>{created.refCode}</code> → Assigned to{' '}
+                <strong>{ORG_ROLE_LABELS[assignedRole]}</strong>
               </h2>
             </div>
             <button type="button" className="btn btn-sm" onClick={() => setCreated(null)}>
-              Prepare Another
+              + New Paper
             </button>
           </div>
 
           <div className="grid-2" style={{ gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center' }}>
             <div className="stack">
+              <div className="row">
+                <Link href={`/sign/${created.token}`} className="btn btn-primary btn-lg">
+                  Open &amp; Sign This Paper Now →
+                </Link>
+                <Link href="/team" className="btn btn-lg">
+                  View in Team Hub
+                </Link>
+                <button type="button" className="btn" onClick={() => copyText(created.signUrl, 'Signing link')}>
+                  Copy Share Link
+                </button>
+              </div>
               <div className="copy-field">
                 <input className="input" readOnly value={created.signUrl} onFocus={(e) => e.currentTarget.select()} />
-                <button type="button" className="btn" onClick={() => copyText(created.signUrl, 'Signing link')}>
-                  Copy Link
-                </button>
-                <Link href={`/sign/${created.token}`} className="btn btn-primary">
-                  Open Signing Page →
-                </Link>
-                <Link href="/team" className="btn">
-                  Team Hub
-                </Link>
-              </div>
-              <div className="row-between">
-                <span className="small muted">
-                  {created.emailDelivered
-                    ? `✓ Email delivered to ${signer2Email} via ${created.emailTransport}.`
-                    : created.emailTransport === 'console'
-                      ? 'Demo mail mode: click "Open Signing Page →" or scan the QR code to co-sign immediately.'
-                      : `Email error (${created.emailError ?? 'SMTP'}) — share the link above directly.`}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => downloadBytes(created.pdfBytes, `${created.refCode}-stage1.pdf`)}
-                >
-                  Download Stage-1 PDF ({formatBytes(created.pdfBytes.length)})
-                </button>
-              </div>
-              <div>
-                <div className="small muted" style={{ marginBottom: 4 }}>
-                  Stage-1 SHA-256 Fingerprint (registered in Supabase ledger)
-                </div>
-                <div className="hash-box">
-                  <span>{created.sha256}</span>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => copyText(created.sha256, 'SHA-256 fingerprint')}
-                  >
-                    Copy Hash
-                  </button>
-                </div>
               </div>
             </div>
-            <QrCodeSvg value={created.signUrl} size={112} />
+            <QrCodeSvg value={created.signUrl} size={100} />
           </div>
         </div>
       )}
 
+      {/* ── Step 1: Dropzone when no file is loaded ── */}
       {pages.length === 0 ? (
         <div className="stack">
           <label
@@ -574,22 +477,8 @@ export default function ScanPreparePage() {
                 <path d="M12 16V4m0 0-4 4m4-4 4 4M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
               </svg>
             </div>
-            <strong>
-              {importing
-                ? 'Importing pages...'
-                : 'Drop paper photos or a PDF here, paste from clipboard (Ctrl+V), or click to browse'}
-            </strong>
-            <span className="muted">
-              Multi-page camera &amp; file import · 100% original paper &amp; ink colors · auto-compressed to ≤1400 px
-              (0.82 JPEG)
-            </span>
-            <div className="feature-pills">
-              <span className="feature-pill">✦ 4-Corner &amp; Edge Crop</span>
-              <span className="feature-pill">✦ Auto-Trim Paper Boundary</span>
-              <span className="feature-pill">✦ -15°..+15° Tilt Grid</span>
-              <span className="feature-pill">✦ A4 / US Letter Presets</span>
-              <span className="feature-pill">✦ SHA-256 + Email OTP Gate</span>
-            </div>
+            <strong>{importing ? 'Loading...' : 'Drop a Paper Photo or PDF here (or click to browse)'}</strong>
+            <span className="muted">Keeps 100% original colors · Automatically crops &amp; optimizes</span>
             <input
               type="file"
               accept="image/*,application/pdf"
@@ -599,45 +488,43 @@ export default function ScanPreparePage() {
             />
           </label>
 
-          <div className="card row-between">
-            <div>
-              <h3>Want to see the full workflow immediately?</h3>
-              <p className="muted small">
-                Load a realistic full-color photographed contract on a desk to test Auto-Trim, Tilt, Signer 1 Mark, and
-                OTP Co-Signing.
-              </p>
-            </div>
+          <div className="row" style={{ justifyContent: 'center' }}>
+            <button type="button" className="btn" onClick={() => setCameraOpen(true)}>
+              📷 Take Photo with Camera
+            </button>
             <button type="button" className="btn btn-primary" onClick={loadSamplePaper} disabled={importing}>
-              ✦ Load Sample Paper Contract
+              ✦ Try with 1-Click Sample Paper
             </button>
           </div>
         </div>
       ) : (
         <div className="grid-2">
-          {/* ── Left: page filmstrip + crop/rotate/tilt editor ── */}
+          {/* ── Left: Clean Paper Editor ── */}
           <div className="stack">
             <div className="card stack">
               <div className="row-between">
                 <div className="row">
-                  <h2>Pages ({pages.length})</h2>
-                  <span className="badge badge-primary">100% Original Colors</span>
-                  {importing && (
-                    <span className="small muted">
-                      <span className="spinner" /> importing...
-                    </span>
-                  )}
+                  <h2>Paper Preview ({pages.length} page{pages.length > 1 ? 's' : ''})</h2>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={runAutoTrim}>
+                    ✦ Auto-Trim Edges
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => rotateBy(-90)}>
+                    ↺ -90°
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => rotateBy(90)}>
+                    ↻ +90°
+                  </button>
                 </div>
                 <div className="row">
-                  {pages.length > 1 && (
-                    <button type="button" className="btn btn-sm" onClick={autoTrimAll}>
-                      Auto-Trim All
-                    </button>
-                  )}
-                  <button type="button" className="btn btn-sm" onClick={() => setCameraOpen(true)}>
-                    + Camera
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${showAdvanced ? 'on' : ''}`}
+                    onClick={() => setShowAdvanced((v) => !v)}
+                  >
+                    {showAdvanced ? 'Hide Fine Tools' : '⚙ Fine Tilt / Page Size'}
                   </button>
                   <label className="btn btn-sm">
-                    + Files
+                    + Add Page
                     <input
                       type="file"
                       accept="image/*,application/pdf"
@@ -648,129 +535,128 @@ export default function ScanPreparePage() {
                   </label>
                 </div>
               </div>
-              <div className="thumbs">
-                {pages.map((p, idx) => (
-                  <div
-                    key={p.id}
-                    className={`thumb ${active?.id === p.id ? 'active' : ''}`}
-                    onClick={() => setActiveId(p.id)}
-                  >
-                    <span className="thumb-index">{idx + 1}</span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.src} alt={p.name} />
-                    <div className="thumb-actions" onClick={(e) => e.stopPropagation()}>
-                      <button type="button" title="Move left" disabled={idx === 0} onClick={() => movePage(idx, -1)}>
-                        ←
-                      </button>
-                      <button
-                        type="button"
-                        title="Move right"
-                        disabled={idx === pages.length - 1}
-                        onClick={() => movePage(idx, 1)}
-                      >
-                        →
-                      </button>
-                      <button type="button" title="Remove page" onClick={() => removePage(p.id)}>
-                        ×
-                      </button>
+
+              {pages.length > 1 && (
+                <div className="thumbs">
+                  {pages.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      className={`thumb ${active?.id === p.id ? 'active' : ''}`}
+                      onClick={() => setActiveId(p.id)}
+                    >
+                      <span className="thumb-index">{idx + 1}</span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.src} alt={p.name} />
+                      <div className="thumb-actions" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" onClick={() => removePage(p.id)}>
+                          ×
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {active && (
-              <div className="card stack">
-                <div className="toolbar">
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${adjustingCrop ? 'on' : ''}`}
-                    onClick={() => setAdjustingCrop((v) => !v)}
-                  >
-                    Adjust Crop Box
-                  </button>
-                  <button type="button" className="btn btn-sm" onClick={runAutoTrim} title="Shortcut: A">
-                    Auto Trim Edges
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => updateEdit({ crop: { ...FULL_CROP } })}
-                  >
-                    Reset Crop
-                  </button>
-                  <span className="sep" />
-                  <button type="button" className="btn btn-sm" onClick={() => rotateBy(-90)} title="Shortcut: Shift+R">
-                    -90°
-                  </button>
-                  <button type="button" className="btn btn-sm" onClick={() => rotateBy(90)} title="Shortcut: R">
-                    +90°
-                  </button>
-                  <button type="button" className="btn btn-sm" onClick={() => rotateBy(180)}>
-                    180°
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${active.edit.flipH ? 'on' : ''}`}
-                    onClick={() => updateEdit({ flipH: !active.edit.flipH })}
-                  >
-                    Flip H
-                  </button>
-                  <span className="sep" />
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${showGrid ? 'on' : ''}`}
-                    onClick={() => setShowGrid((g) => !g)}
-                    title="Shortcut: G"
-                  >
-                    Alignment Grid
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${compareOrig ? 'on' : ''}`}
-                    onPointerDown={() => setCompareOrig(true)}
-                    onPointerUp={() => setCompareOrig(false)}
-                    onPointerLeave={() => setCompareOrig(false)}
-                    title="Hold to compare raw unedited photo"
-                  >
-                    Hold: Original
-                  </button>
+                  ))}
                 </div>
+              )}
 
-                <label className="field">
-                  <div className="row-between">
+              {/* Optional Collapsible Fine Tools (hidden by default so UI stays super simple) */}
+              {active && showAdvanced && (
+                <div
+                  className="stack"
+                  style={{
+                    padding: 14,
+                    borderRadius: 14,
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div className="toolbar">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${adjustingCrop ? 'on' : ''}`}
+                      onClick={() => setAdjustingCrop((v) => !v)}
+                    >
+                      Crop Handles
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => updateEdit({ crop: { ...FULL_CROP } })}
+                    >
+                      Reset Crop
+                    </button>
+                    <button type="button" className="btn btn-sm" onClick={() => rotateBy(180)}>
+                      180°
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${active.edit.flipH ? 'on' : ''}`}
+                      onClick={() => updateEdit({ flipH: !active.edit.flipH })}
+                    >
+                      Flip H
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${showGrid ? 'on' : ''}`}
+                      onClick={() => setShowGrid((g) => !g)}
+                    >
+                      Grid
+                    </button>
+                  </div>
+
+                  <label className="field">
                     <span>Fine Straighten / Tilt (-15° to +15°)</span>
-                    <div className="row">
-                      <span className="small muted">
-                        Shortcuts: <span className="kbd">A</span> Auto-Trim · <span className="kbd">R</span> Rotate ·{' '}
-                        <span className="kbd">G</span> Grid
-                      </span>
-                      {active.edit.tilt !== 0 && (
+                    <div className="range-row">
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        step={0.25}
+                        value={active.edit.tilt}
+                        onChange={(e) => updateEdit({ tilt: Number(e.target.value) })}
+                      />
+                      <output>{active.edit.tilt.toFixed(1)}°</output>
+                    </div>
+                  </label>
+
+                  <div className="fields-2">
+                    <div className="field">
+                      <span>Page Size</span>
+                      <div className="seg full">
+                        {(['a4p', 'a4l', 'letter', 'original'] as PageSizePreset[]).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            className={output.preset === p ? 'active' : ''}
+                            onClick={() => setOutput({ ...output, preset: p })}
+                          >
+                            {PRESET_LABELS[p]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <span>Layout</span>
+                      <div className="seg full">
                         <button
                           type="button"
-                          className="btn btn-sm btn-ghost"
-                          onClick={() => updateEdit({ tilt: 0 })}
+                          className={output.mode === 'fit' ? 'active' : ''}
+                          onClick={() => setOutput({ ...output, mode: 'fit' })}
                         >
-                          Reset 0°
+                          Fit w/ Margin
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          className={output.mode === 'fill' ? 'active' : ''}
+                          onClick={() => setOutput({ ...output, mode: 'fill' })}
+                        >
+                          Fill Page
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="range-row">
-                    <input
-                      type="range"
-                      min={-15}
-                      max={15}
-                      step={0.25}
-                      value={active.edit.tilt}
-                      onFocus={() => setShowGrid(true)}
-                      onBlur={() => setShowGrid(false)}
-                      onChange={(e) => updateEdit({ tilt: Number(e.target.value) })}
-                    />
-                    <output>{active.edit.tilt.toFixed(1)}°</output>
-                  </div>
-                </label>
+                </div>
+              )}
 
+              {active && (
                 <div className="editor-stage">
                   <div
                     ref={cropWrapRef}
@@ -781,197 +667,56 @@ export default function ScanPreparePage() {
                   >
                     <canvas ref={stageCanvasRef} />
                     {(showGrid || active.edit.tilt !== 0) && <div className="grid-overlay" />}
-                    {!compareOrig && (
-                      <div
-                        className={`crop-box ${adjustingCrop ? '' : 'locked'}`}
-                        style={{
-                          left: `${active.edit.crop.x * 100}%`,
-                          top: `${active.edit.crop.y * 100}%`,
-                          width: `${active.edit.crop.w * 100}%`,
-                          height: `${active.edit.crop.h * 100}%`,
-                        }}
-                        onPointerDown={startCropDrag('move')}
-                      >
-                        <div className="crop-thirds" />
-                        <span className="crop-dim-badge">
-                          {Math.round(active.edit.crop.w * 100)}% × {Math.round(active.edit.crop.h * 100)}%
-                        </span>
-                        {adjustingCrop && (
-                          <>
-                            <span className="handle nw" onPointerDown={startCropDrag('nw')} />
-                            <span className="handle ne" onPointerDown={startCropDrag('ne')} />
-                            <span className="handle sw" onPointerDown={startCropDrag('sw')} />
-                            <span className="handle se" onPointerDown={startCropDrag('se')} />
-                            <span className="handle edge n" onPointerDown={startCropDrag('n')} />
-                            <span className="handle edge s" onPointerDown={startCropDrag('s')} />
-                            <span className="handle edge v w" onPointerDown={startCropDrag('w')} />
-                            <span className="handle edge v e" onPointerDown={startCropDrag('e')} />
-                          </>
-                        )}
-                      </div>
-                    )}
+                    <div
+                      className={`crop-box ${adjustingCrop ? '' : 'locked'}`}
+                      style={{
+                        left: `${active.edit.crop.x * 100}%`,
+                        top: `${active.edit.crop.y * 100}%`,
+                        width: `${active.edit.crop.w * 100}%`,
+                        height: `${active.edit.crop.h * 100}%`,
+                      }}
+                      onPointerDown={startCropDrag('move')}
+                    >
+                      <div className="crop-thirds" />
+                      {adjustingCrop && (
+                        <>
+                          <span className="handle nw" onPointerDown={startCropDrag('nw')} />
+                          <span className="handle ne" onPointerDown={startCropDrag('ne')} />
+                          <span className="handle sw" onPointerDown={startCropDrag('sw')} />
+                          <span className="handle se" onPointerDown={startCropDrag('se')} />
+                          <span className="handle edge n" onPointerDown={startCropDrag('n')} />
+                          <span className="handle edge s" onPointerDown={startCropDrag('s')} />
+                          <span className="handle edge v w" onPointerDown={startCropDrag('w')} />
+                          <span className="handle edge v e" onPointerDown={startCropDrag('e')} />
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+              <canvas ref={previewCanvasRef} style={{ display: 'none' }} />
+            </div>
           </div>
 
-          {/* ── Right: output page presets + signer details + submit ── */}
+          {/* ── Right: Ultra-Simple Send Box ── */}
           <div className="stack sticky">
             <div className="card stack">
-              <div className="row-between">
-                <h2>Output Page Setup</h2>
-                <span className="badge badge-muted">≤1400 px · Lightweight</span>
-              </div>
-              <div className="field">
-                <span>Page Size Preset</span>
-                <div className="seg full">
-                  {(['a4p', 'a4l', 'letter', 'original'] as PageSizePreset[]).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      className={output.preset === p ? 'active' : ''}
-                      onClick={() => setOutput({ ...output, preset: p })}
-                    >
-                      {PRESET_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
-                <span>Scaling Mode</span>
-                <div className="seg full">
-                  <button
-                    type="button"
-                    className={output.mode === 'fit' ? 'active' : ''}
-                    onClick={() => setOutput({ ...output, mode: 'fit' })}
-                  >
-                    Fit w/ White Margin
-                  </button>
-                  <button
-                    type="button"
-                    className={output.mode === 'fill' ? 'active' : ''}
-                    onClick={() => setOutput({ ...output, mode: 'fill' })}
-                  >
-                    Fill Page
-                  </button>
-                </div>
-              </div>
-              <div className="fields-2">
-                <label className="field">
-                  <span>Margin %</span>
-                  <div className="range-row">
-                    <input
-                      type="range"
-                      min={0}
-                      max={18}
-                      step={0.5}
-                      value={output.margin}
-                      onChange={(e) => setOutput({ ...output, margin: Number(e.target.value) })}
-                    />
-                    <output>{output.margin}%</output>
-                  </div>
-                </label>
-                <label className="field">
-                  <span>Zoom %</span>
-                  <div className="range-row">
-                    <input
-                      type="range"
-                      min={60}
-                      max={160}
-                      step={2}
-                      value={output.zoom}
-                      onChange={(e) => setOutput({ ...output, zoom: Number(e.target.value) })}
-                    />
-                    <output>{output.zoom}%</output>
-                  </div>
-                </label>
-              </div>
-              <div className="field">
-                <span>Compression Format</span>
-                <div className="seg full">
-                  <button
-                    type="button"
-                    className={output.format === 'jpeg' ? 'active' : ''}
-                    onClick={() => setOutput({ ...output, format: 'jpeg' })}
-                  >
-                    JPEG 0.82 · ≤1400 px
-                  </button>
-                  <button
-                    type="button"
-                    className={output.format === 'png' ? 'active' : ''}
-                    onClick={() => setOutput({ ...output, format: 'png' })}
-                  >
-                    PNG · ≤1400 px
-                  </button>
-                </div>
-              </div>
-              <div>
-                <div className="small muted" style={{ marginBottom: 6 }}>
-                  Live page sheet preview ({PRESET_LABELS[output.preset]})
-                </div>
-                <canvas ref={previewCanvasRef} className="preview-canvas" />
-              </div>
-            </div>
+              <h2>Send Paper for Signature</h2>
 
-            <div className="card stack">
-              <div className="row-between">
-                <h2>Document &amp; Team Routing</h2>
-                <Link href="/team" className="btn btn-sm">
-                  Manage Team
-                </Link>
-              </div>
               <label className="field">
-                <span>Document Title</span>
+                <span>Paper / Document Name</span>
                 <input
                   className="input"
-                  placeholder="e.g. Service Agreement — Q4"
+                  placeholder="e.g. Monthly Expense Approval"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </label>
 
               <div className="field">
-                <span>Prepared By (Your Role)</span>
+                <span>Who Should Sign This Next? (Click 1 Role)</span>
                 <div className="seg full">
-                  {(['hr', 'director', 'boss', 'manager'] as OrgRole[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      className={senderRole === r ? 'active' : ''}
-                      onClick={() => pickSenderRole(r)}
-                    >
-                      {ORG_ROLE_LABELS[r]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="fields-2">
-                <label className="field">
-                  <span>Sender Name</span>
-                  <input
-                    className="input"
-                    placeholder="Noy (HR)"
-                    value={signer1Name}
-                    onChange={(e) => setSigner1Name(e.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Sender Email</span>
-                  <input
-                    className="input"
-                    type="email"
-                    placeholder="hr@signflow.org"
-                    value={signer1Email}
-                    onChange={(e) => setSigner1Email(e.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="field">
-                <span>Route To (Next Approver / Signer Role)</span>
-                <div className="seg full">
-                  {(['director', 'boss', 'hr', 'finance', 'external'] as OrgRole[]).map((r) => (
+                  {(['director', 'boss', 'hr', 'finance'] as OrgRole[]).map((r) => (
                     <button
                       key={r}
                       type="button"
@@ -984,47 +729,21 @@ export default function ScanPreparePage() {
                 </div>
               </div>
 
-              {roster.length > 0 && (
-                <label className="field">
-                  <span>Quick-Pick Team Member</span>
-                  <select
-                    className="select"
-                    value={signer2Email}
-                    onChange={(e) => {
-                      const m = roster.find((x) => x.email === e.target.value);
-                      if (m) {
-                        setAssignedRole(m.role);
-                        setSigner2Name(m.name);
-                        setSigner2Email(m.email);
-                      }
-                    }}
-                  >
-                    {roster.map((m) => (
-                      <option key={m.id} value={m.email}>
-                        {ORG_ROLE_LABELS[m.role]} — {m.name} ({m.email})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
               <div className="fields-2">
                 <label className="field">
-                  <span>Assignee Name</span>
+                  <span>Recipient Name</span>
                   <input
                     className="input"
-                    placeholder="Somsack (Director)"
                     value={signer2Name}
                     onChange={(e) => setSigner2Name(e.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>Assignee Email (required)</span>
+                  <span>Recipient Email</span>
                   <input
                     className="input"
                     type="email"
                     required
-                    placeholder="director@signflow.org"
                     value={signer2Email}
                     onChange={(e) => setSigner2Email(e.target.value)}
                   />
@@ -1032,36 +751,20 @@ export default function ScanPreparePage() {
               </div>
 
               <label className="check">
-                <input type="checkbox" checked={requireOtp} onChange={(e) => setRequireOtp(e.target.checked)} />
-                <span>Require 6-Digit Email OTP (off by default for fast internal HR / Director / Boss signing)</span>
-              </label>
-
-              <label className="check">
                 <input type="checkbox" checked={includeMark} onChange={(e) => setIncludeMark(e.target.checked)} />
-                <span>Add your digital mark on page 1 before routing (Draw or Type)</span>
+                <span>Also stamp my own signature on this paper now</span>
               </label>
 
               {includeMark && (
                 <div className="stack" style={{ padding: 12, background: 'var(--surface-2)', borderRadius: 12 }}>
                   <SignatureCreator defaultText={signer1Name} value={markPng} onChange={setMarkPng} />
-                  <div className="row-between">
-                    <span className="small muted">Stamp position on last page</span>
-                    <div className="seg">
-                      <button
-                        type="button"
-                        className={markPos === 'bl' ? 'active' : ''}
-                        onClick={() => setMarkPos('bl')}
-                      >
-                        Bottom-left
-                      </button>
-                      <button
-                        type="button"
-                        className={markPos === 'br' ? 'active' : ''}
-                        onClick={() => setMarkPos('br')}
-                      >
-                        Bottom-right
-                      </button>
-                    </div>
+                  <div className="seg full">
+                    <button type="button" className={markPos === 'bl' ? 'active' : ''} onClick={() => setMarkPos('bl')}>
+                      Stamp Bottom-Left
+                    </button>
+                    <button type="button" className={markPos === 'br' ? 'active' : ''} onClick={() => setMarkPos('br')}>
+                      Stamp Bottom-Right
+                    </button>
                   </div>
                 </div>
               )}
@@ -1088,16 +791,17 @@ export default function ScanPreparePage() {
                     <span className="spinner" /> {busy}
                   </>
                 ) : (
-                  'Create & Send Signing Link'
+                  `Send to ${ORG_ROLE_LABELS[assignedRole]} for Signing →`
                 )}
               </button>
+
               <button
                 type="button"
                 className="btn btn-block"
                 disabled={Boolean(busy)}
                 onClick={handleDownloadOnly}
               >
-                Download Clean PDF Only
+                Or Just Download Clean PDF
               </button>
             </div>
           </div>
