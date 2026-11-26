@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useGuidedTour } from '@/components/GuidedTour';
 
 interface FeatureGuide {
   id: string;
@@ -212,6 +213,7 @@ const FEATURES: FeatureGuide[] = [
 ];
 
 export default function GuidePage() {
+  const { startTour } = useGuidedTour();
   const [activeId, setActiveId] = useState<string>('all');
 
   const visibleFeatures = activeId === 'all' ? FEATURES : FEATURES.filter((f) => f.id === activeId);
@@ -234,7 +236,9 @@ export default function GuidePage() {
       <div className="card card-hero stack">
         <div className="row-between">
           <h2>The Complete Workflow in 4 Steps</h2>
-          <span className="badge badge-ok">Zero VPN · Supabase Live</span>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => startTour(0)}>
+            ✦ Start Live Spotlight Tour (Highlight 1-by-1)
+          </button>
         </div>
         <div className="guide-flow-grid">
           <div className="guide-flow-step">

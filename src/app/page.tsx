@@ -401,7 +401,7 @@ export default function ScanPreparePage() {
   return (
     <div className="stack">
       {/* ── Easy 3-Step Visual Flow Header ── */}
-      <div className="card row-between" style={{ padding: '14px 20px' }}>
+      <div className="card row-between" style={{ padding: '14px 20px' }} data-tour="scan-steps">
         <div className="row" style={{ gap: 14 }}>
           <span className="badge badge-primary" style={{ padding: '5px 12px', fontSize: '0.82rem' }}>
             1. Upload / Scan Paper
@@ -465,6 +465,7 @@ export default function ScanPreparePage() {
         <div className="stack">
           <label
             className={`dropzone ${dragOver ? 'drag' : ''}`}
+            data-tour="scan-dropzone"
             onDragOver={(e) => {
               e.preventDefault();
               setDragOver(true);

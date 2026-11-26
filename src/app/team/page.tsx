@@ -182,7 +182,7 @@ export default function TeamHubPage() {
       )}
 
       {/* ── Simple 3-Tab Switcher inside Team Hub ── */}
-      <div className="row-between">
+      <div className="row-between" data-tour="team-tabs">
         <div className="seg">
           <button
             type="button"

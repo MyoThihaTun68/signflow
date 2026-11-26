@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/components/AuthProvider';
+import { GuidedTourProvider } from '@/components/GuidedTour';
 import { Nav } from '@/components/Nav';
 import { ToastProvider } from '@/components/Toast';
 import { isSupabaseConfigured, mailTransport } from '@/lib/server/config';
@@ -32,32 +33,34 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ToastProvider>
           <AuthProvider>
-            <div className="app-shell">
-              <Nav />
-              <main className="container">{children}</main>
-              <footer className="site-footer">
-                <div className="site-footer-inner">
-                  <div className="row" style={{ gap: 10 }}>
-                    <span
-                      className={`badge ${backend === 'supabase' ? 'badge-ok' : 'badge-muted'}`}
-                      title={
-                        backend === 'supabase'
-                          ? 'Connected to Supabase PostgreSQL + Private Storage'
-                          : 'Using local .data fallback'
-                      }
-                    >
-                      <span className="badge-dot" />
-                      {backend === 'supabase' ? 'Supabase Connected' : 'Local Storage'}
-                    </span>
-                    {mail !== 'console' && (
-                      <span className="badge badge-primary">Mail: {mail.toUpperCase()}</span>
-                    )}
-                    <span>SignFlow · SHA-256 Cryptographic Ledger</span>
+            <GuidedTourProvider>
+              <div className="app-shell">
+                <Nav />
+                <main className="container">{children}</main>
+                <footer className="site-footer">
+                  <div className="site-footer-inner">
+                    <div className="row" style={{ gap: 10 }}>
+                      <span
+                        className={`badge ${backend === 'supabase' ? 'badge-ok' : 'badge-muted'}`}
+                        title={
+                          backend === 'supabase'
+                            ? 'Connected to Supabase PostgreSQL + Private Storage'
+                            : 'Using local .data fallback'
+                        }
+                      >
+                        <span className="badge-dot" />
+                        {backend === 'supabase' ? 'Supabase Connected' : 'Local Storage'}
+                      </span>
+                      {mail !== 'console' && (
+                        <span className="badge badge-primary">Mail: {mail.toUpperCase()}</span>
+                      )}
+                      <span>SignFlow · SHA-256 Cryptographic Ledger</span>
+                    </div>
+                    <span>100% Original Color Scanner · Pure Ink Stamp</span>
                   </div>
-                  <span>100% Original Color Scanner · Pure Ink Stamp</span>
-                </div>
-              </footer>
-            </div>
+                </footer>
+              </div>
+            </GuidedTourProvider>
           </AuthProvider>
         </ToastProvider>
       </body>

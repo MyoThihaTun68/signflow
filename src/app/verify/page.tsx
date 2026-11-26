@@ -191,7 +191,7 @@ export default function VerifyPage() {
       </div>
 
       {/* ── Unified Verification Card with Clean OR Divider ── */}
-      <div className="card verify-card stack">
+      <div className="card verify-card stack" data-tour="verify-card">
         <div
           className={`dropzone verify-dropzone ${drag ? 'drag' : ''} ${busy ? 'scan-beam' : ''}`}
           onDragOver={(e) => {

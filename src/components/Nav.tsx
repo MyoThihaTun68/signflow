@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { useGuidedTour } from '@/components/GuidedTour';
 import { roleLabel } from '@/lib/types';
 
 type SchemeMode = 'system' | 'light' | 'dark';
@@ -30,6 +31,7 @@ function applyMetaColorScheme(mode: SchemeMode) {
 export function Nav() {
   const pathname = usePathname() || '/';
   const { user, openAuthModal, logout } = useAuth();
+  const { startTour } = useGuidedTour();
   const [scheme, setScheme] = useState<SchemeMode>('system');
   const [sysDark, setSysDark] = useState(false);
   const [accent, setAccent] = useState<AccentId>('blue');
@@ -181,7 +183,7 @@ export function Nav() {
             SignFlow
           </Link>
 
-          <nav className="tabs" aria-label="Sections">
+          <nav className="tabs" aria-label="Sections" data-tour="nav-tabs">
             <Link href="/" className={`tab ${pathname === '/' ? 'active' : ''}`}>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M4 7V5a1 1 0 0 1 1-1h2M20 7V5a1 1 0 0 0-1-1h-2M4 17v2a1 1 0 0 0 1 1h2M20 17v2a1 1 0 0 1-1 1h-2M7 12h10" />
@@ -220,9 +222,19 @@ export function Nav() {
             </Link>
           </nav>
 
-          {/* Clean Right Header: Single Profile Dropdown + Appearance Toggle */}
+          {/* Clean Right Header: Interactive Tour Button + Profile Dropdown + Appearance Toggle */}
           <div className="env-badges">
-            {user ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => startTour(0)}
+              title="Start interactive spotlight tour (highlights each feature 1-by-1)"
+            >
+              ✦ Tour
+            </button>
+
+            <div data-tour="account-menu">
+              {user ? (
               <div className="theme-menu-wrap" ref={profileRef}>
                 <button
                   type="button"
@@ -289,9 +301,10 @@ export function Nav() {
                 Sign In
               </button>
             )}
+            </div>
 
             {/* iOS Minimalist Appearance & Theme Control Center */}
-            <div className="theme-menu-wrap" ref={themeRef}>
+            <div className="theme-menu-wrap" ref={themeRef} data-tour="theme-toggle">
               <button
                 type="button"
                 className={`theme-trigger ${openTheme ? 'active' : ''}`}
