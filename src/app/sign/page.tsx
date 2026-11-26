@@ -2,20 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { PdfCanvasViewer } from '@/components/PdfCanvasViewer';
 import { SignatureCreator } from '@/components/SignatureCreator';
-import { formatUtc } from '@/lib/pdf/certificate';
-import { DECISION_COLORS, dataUrlToBytes, drawRefFooter, drawStamp } from '@/lib/pdf/stamp';
+import { dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
 import { downloadBytes, slugify } from '@/lib/client/buildPdf';
 import { sha256Hex } from '@/lib/client/sha256';
 import { DECISION_LABELS, type Decision } from '@/lib/types';
-
-const DECISION_HEX: Record<Decision, string> = {
-  approved: '#16a34a',
-  approved_with_notes: '#d97706',
-  rejected: '#dc2626',
-};
 
 function parseToken(input: string): string | null {
   const trimmed = input.trim();
@@ -83,17 +76,10 @@ export default function SignLandingPage() {
     setError(null);
     try {
       const refCode = `SF-${Math.floor(100000 + Math.random() * 900000)}`;
-      const now = new Date().toISOString();
-      const name = signerName.trim() || signerEmail.trim() || 'Direct Signer';
 
       const pdf = await PDFDocument.load(rawPdf, { updateMetadata: false });
-      await drawRefFooter(pdf, refCode);
-      await drawStamp(pdf, stampPos.page, dataUrlToBytes(signaturePng), { cx: stampPos.cx, cy: stampPos.cy, widthFrac }, [
-        { text: DECISION_LABELS[decision].toUpperCase(), size: 9, bold: true, color: DECISION_COLORS[decision] },
-        { text: `${name} · ${formatUtc(now)}`, size: 7, color: rgb(0.25, 0.29, 0.36) },
-        ...(note.trim() ? [{ text: `Note: ${note.trim()}`, size: 7 }] : []),
-        { text: `Ref ${refCode} · Direct sign`, size: 6, color: rgb(0.5, 0.55, 0.62) },
-      ]);
+      // Embed ONLY the pure signature image on the page (zero text/email clutter)
+      await drawStamp(pdf, stampPos.page, dataUrlToBytes(signaturePng), { cx: stampPos.cx, cy: stampPos.cy, widthFrac }, []);
       pdf.setSubject(`SignFlow ${refCode}`);
       pdf.setProducer('SignFlow (pdf-lib)');
       pdf.setModificationDate(new Date());
@@ -172,8 +158,6 @@ export default function SignLandingPage() {
                         cy: stampPos.cy,
                         widthFrac,
                         png: signaturePng,
-                        caption: DECISION_LABELS[decision].toUpperCase(),
-                        captionColor: DECISION_HEX[decision],
                       }
                     : null
                 }

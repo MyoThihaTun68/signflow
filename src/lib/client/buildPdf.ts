@@ -1,8 +1,7 @@
 'use client';
 
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
-import { formatUtc } from '@/lib/pdf/certificate';
 import type { PageOutput } from './image';
 
 export interface Signer1Mark {
@@ -25,10 +24,7 @@ export async function buildScanPdf(pages: PageOutput[], title: string, mark: Sig
       pdf.getPageCount() - 1,
       dataUrlToBytes(mark.png),
       { cx: mark.position === 'bl' ? 0.2 : 0.8, cy: 0.86, widthFrac: 0.24 },
-      [
-        { text: `Signer 1: ${mark.name || 'Sender'}`, size: 8, bold: true, color: rgb(0.15, 0.39, 0.92) },
-        { text: formatUtc(new Date().toISOString()), size: 6.5 },
-      ],
+      [],
     );
   }
   pdf.setTitle(title || 'Scanned document');

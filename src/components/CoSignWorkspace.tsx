@@ -8,19 +8,12 @@ import { RolePicker, useCustomRoles } from '@/components/RolePicker';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
 import {
-  DECISION_LABELS,
   roleLabel,
   type Decision,
   type OrgRole,
   type PublicDocument,
   type TeamMember,
 } from '@/lib/types';
-
-const DECISION_HEX: Record<Decision, string> = {
-  approved: '#1d9a45',
-  approved_with_notes: '#c96a00',
-  rejected: '#d72638',
-};
 
 export function CoSignWorkspace({ token }: { token: string }) {
   const { toast } = useToast();
@@ -295,8 +288,6 @@ export function CoSignWorkspace({ token }: { token: string }) {
                       cy: stampPos.cy,
                       widthFrac,
                       png: signaturePng,
-                      caption: `${roleLabel(signerRole).toUpperCase()} · ${DECISION_LABELS[decision].toUpperCase()}`,
-                      captionColor: DECISION_HEX[decision],
                     }
                   : null
               }

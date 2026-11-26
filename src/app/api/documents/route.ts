@@ -4,7 +4,6 @@ import { putObject, removeObject } from '@/lib/server/storage';
 import { randomRefCode, randomToken, sha256Hex } from '@/lib/server/crypto';
 import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from '@/lib/server/http';
 import { sendMail, signRequestEmail } from '@/lib/server/mailer';
-import { drawRefFooter } from '@/lib/pdf/stamp';
 import { normalizeRole, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -51,7 +50,7 @@ export async function POST(req: Request) {
   try {
     const pdf = await PDFDocument.load(raw, { updateMetadata: false });
     pageCount = pdf.getPageCount();
-    await drawRefFooter(pdf, refCode);
+    // Keep the visible PDF page 100% clean — store reference code in PDF metadata only
     pdf.setTitle(title);
     pdf.setSubject(`SignFlow ${refCode}`);
     pdf.setKeywords(['SignFlow', refCode, 'stage1']);

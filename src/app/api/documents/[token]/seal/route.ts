@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { getRepo } from '@/lib/server/db';
 import { findByToken, hasValidSession, toPublicDocument } from '@/lib/server/documents';
 import { hmacHex, sha256Hex } from '@/lib/server/crypto';
@@ -6,8 +6,7 @@ import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from
 import { completedEmail, sendMail, signRequestEmail } from '@/lib/server/mailer';
 import { getObject, putObject } from '@/lib/server/storage';
 import { isP12Configured, signWithP12 } from '@/lib/server/p12';
-import { formatUtc } from '@/lib/pdf/certificate';
-import { DECISION_COLORS, dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
+import { dataUrlToBytes, drawStamp } from '@/lib/pdf/stamp';
 import {
   DECISION_LABELS,
   normalizeRole,
@@ -98,20 +97,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const pageIndex = Math.floor(page);
   if (pageIndex >= pdf.getPageCount()) return jsonError('Page out of range.');
 
-  const roleBadge = roleLabel(signerRole).toUpperCase();
+  // Embed ONLY the pure transparent signature image on the page (no extra text/email/timestamp lines on the PDF)
   let stamp;
   try {
-    stamp = await drawStamp(pdf, pageIndex, dataUrlToBytes(signature), { cx, cy, widthFrac }, [
-      {
-        text: `${roleBadge} · ${DECISION_LABELS[decision].toUpperCase()}`,
-        size: 8.5,
-        bold: true,
-        color: DECISION_COLORS[decision],
-      },
-      { text: `${signerName} (${signerEmail})`, size: 6.8, color: rgb(0.22, 0.26, 0.34) },
-      { text: `${formatUtc(signedAt)} · Ref ${doc.ref_code}`, size: 6.2, color: rgb(0.45, 0.5, 0.58) },
-      ...(note ? [{ text: `Note: ${note}`, size: 6.8, color: rgb(0.28, 0.31, 0.38) }] : []),
-    ]);
+    stamp = await drawStamp(pdf, pageIndex, dataUrlToBytes(signature), { cx, cy, widthFrac }, []);
   } catch {
     return jsonError('Signature image could not be embedded.', 400);
   }
