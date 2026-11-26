@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'SignFlow — Scan, Sign & Verify',
-  description: 'Turn paper into clean PDFs, collect OTP-verified co-signatures and verify sealed documents.',
+  description: 'Turn paper into clean PDFs, collect team co-signatures and verify sealed documents.',
 };
 
 export const viewport: Viewport = {
@@ -32,12 +32,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ToastProvider>
           <AuthProvider>
-            <Nav backend={backend} mail={mail} />
-            <main className="container">{children}</main>
-            <footer className="site-footer">
-              <span>SignFlow · SHA-256 Cryptographic Ledger · Connected Team Workspace</span>
-              <span>100% Original Color Scanner · iOS Minimalist Edition</span>
-            </footer>
+            <div className="app-shell">
+              <Nav />
+              <main className="container">{children}</main>
+              <footer className="site-footer">
+                <div className="site-footer-inner">
+                  <div className="row" style={{ gap: 10 }}>
+                    <span
+                      className={`badge ${backend === 'supabase' ? 'badge-ok' : 'badge-muted'}`}
+                      title={
+                        backend === 'supabase'
+                          ? 'Connected to Supabase PostgreSQL + Private Storage'
+                          : 'Using local .data fallback'
+                      }
+                    >
+                      <span className="badge-dot" />
+                      {backend === 'supabase' ? 'Supabase Connected' : 'Local Storage'}
+                    </span>
+                    {mail !== 'console' && (
+                      <span className="badge badge-primary">Mail: {mail.toUpperCase()}</span>
+                    )}
+                    <span>SignFlow · SHA-256 Cryptographic Ledger</span>
+                  </div>
+                  <span>100% Original Color Scanner · Pure Ink Stamp</span>
+                </div>
+              </footer>
+            </div>
           </AuthProvider>
         </ToastProvider>
       </body>

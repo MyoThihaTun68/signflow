@@ -27,15 +27,17 @@ function applyMetaColorScheme(mode: SchemeMode) {
   meta.content = mode === 'system' ? 'light dark' : mode;
 }
 
-export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'resend' | 'smtp' | 'console' }) {
+export function Nav() {
   const pathname = usePathname() || '/';
   const { user, openAuthModal, logout } = useAuth();
   const [scheme, setScheme] = useState<SchemeMode>('system');
   const [sysDark, setSysDark] = useState(false);
   const [accent, setAccent] = useState<AccentId>('blue');
-  const [openPanel, setOpenPanel] = useState(false);
+  const [openTheme, setOpenTheme] = useState(false);
+  const [openProfile, setOpenProfile] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const themeRef = useRef<HTMLDivElement | null>(null);
+  const profileRef = useRef<HTMLDivElement | null>(null);
 
   // Live "Waiting for Me" notification badge count on Team Hub
   useEffect(() => {
@@ -79,7 +81,7 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
         document.documentElement.dataset.accent = savedAccent;
       }
     } catch {
-      // ignore storage restrictions
+      // ignore
     }
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -105,14 +107,17 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
   }, []);
 
   useEffect(() => {
-    if (!openPanel) return;
+    if (!openTheme && !openProfile) return;
     const onClick = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setOpenPanel(false);
-      }
+      const target = e.target as Node;
+      if (openTheme && themeRef.current && !themeRef.current.contains(target)) setOpenTheme(false);
+      if (openProfile && profileRef.current && !profileRef.current.contains(target)) setOpenProfile(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenPanel(false);
+      if (e.key === 'Escape') {
+        setOpenTheme(false);
+        setOpenProfile(false);
+      }
     };
     window.addEventListener('mousedown', onClick);
     window.addEventListener('keydown', onKey);
@@ -120,7 +125,7 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
       window.removeEventListener('mousedown', onClick);
       window.removeEventListener('keydown', onKey);
     };
-  }, [openPanel]);
+  }, [openTheme, openProfile]);
 
   const selectScheme = (next: SchemeMode) => {
     setScheme(next);
@@ -145,187 +150,215 @@ export function Nav({ backend, mail }: { backend: 'supabase' | 'local'; mail: 'r
   };
 
   const resolvedDark = scheme === 'dark' || (scheme === 'system' && sysDark);
+  const initials = user
+    ? user.name
+        .split(' ')
+        .map((w) => w[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    : '';
 
   return (
     <>
       <header className="topbar">
-      <div className="topbar-inner">
-        <Link href="/" className="brand" aria-label="SignFlow home">
-          <span className="brand-mark" aria-hidden>
-            <svg
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3 17c3-4 5-9 7-9s-1 9 2 9 3-5 5-5 2 3 4 3" />
-            </svg>
-          </span>
-          SignFlow
-        </Link>
-
-        <nav className="tabs" aria-label="Sections">
-          <Link href="/" className={`tab ${pathname === '/' ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 7V5a1 1 0 0 1 1-1h2M20 7V5a1 1 0 0 0-1-1h-2M4 17v2a1 1 0 0 0 1 1h2M20 17v2a1 1 0 0 1-1 1h-2M7 12h10" />
-            </svg>
-            Scan &amp; Prepare
-          </Link>
-          <Link href="/sign" className={`tab ${pathname.startsWith('/sign') ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-            Review &amp; Co-Sign
-          </Link>
-          <Link href="/team" className={`tab ${pathname.startsWith('/team') ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm14 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            Team Hub
-            {pendingCount > 0 && (
-              <span className="nav-notif-pill" title={`${pendingCount} paper(s) waiting for signature`}>
-                {pendingCount}
-              </span>
-            )}
-          </Link>
-          <Link href="/verify" className={`tab ${pathname.startsWith('/verify') ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4Zm-2.5 9 2 2 4-4" />
-            </svg>
-            Verify PDF
-          </Link>
-        </nav>
-
-        <div className="env-badges">
-          {user ? (
-            <div className="row" style={{ gap: 6 }}>
-              <Link
-                href="/team"
-                className="badge badge-primary"
-                title={`Signed in as ${user.email}`}
-                style={{ padding: '5px 11px', textDecoration: 'none' }}
+        <div className="topbar-inner">
+          <Link href="/" className="brand" aria-label="SignFlow home">
+            <span className="brand-mark" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <span className="badge-dot" />
-                {roleLabel(user.role)} · {user.name.split(' (')[0]}
-              </Link>
+                <path d="M3 17c3-4 5-9 7-9s-1 9 2 9 3-5 5-5 2 3 4 3" />
+              </svg>
+            </span>
+            SignFlow
+          </Link>
+
+          <nav className="tabs" aria-label="Sections">
+            <Link href="/" className={`tab ${pathname === '/' ? 'active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7V5a1 1 0 0 1 1-1h2M20 7V5a1 1 0 0 0-1-1h-2M4 17v2a1 1 0 0 0 1 1h2M20 17v2a1 1 0 0 1-1 1h-2M7 12h10" />
+              </svg>
+              Scan &amp; Prepare
+            </Link>
+            <Link href="/sign" className={`tab ${pathname.startsWith('/sign') ? 'active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+              Review &amp; Co-Sign
+            </Link>
+            <Link href="/team" className={`tab ${pathname.startsWith('/team') ? 'active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm14 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              Team Hub
+              {pendingCount > 0 && (
+                <span className="nav-notif-pill" title={`${pendingCount} paper(s) waiting for signature`}>
+                  {pendingCount}
+                </span>
+              )}
+            </Link>
+            <Link href="/verify" className={`tab ${pathname.startsWith('/verify') ? 'active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4Zm-2.5 9 2 2 4-4" />
+              </svg>
+              Verify PDF
+            </Link>
+          </nav>
+
+          {/* Clean Right Header: Single Profile Dropdown + Appearance Toggle */}
+          <div className="env-badges">
+            {user ? (
+              <div className="theme-menu-wrap" ref={profileRef}>
+                <button
+                  type="button"
+                  className={`profile-pill ${openProfile ? 'active' : ''}`}
+                  onClick={() => {
+                    setOpenProfile((v) => !v);
+                    setOpenTheme(false);
+                  }}
+                  aria-expanded={openProfile}
+                  aria-label="Account menu"
+                >
+                  <span className="profile-avatar">{initials}</span>
+                  <span className="profile-name">{user.name.split(' (')[0]}</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+
+                {openProfile && (
+                  <div className="theme-popover profile-popover" role="menu">
+                    <div className="profile-popover-head">
+                      <span className="profile-avatar lg">{initials}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 680, fontSize: '0.92rem' }}>{user.name}</div>
+                        <div className="small muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {user.email}
+                        </div>
+                        <span className="badge badge-primary" style={{ marginTop: 4 }}>
+                          {roleLabel(user.role)}
+                        </span>
+                      </div>
+                    </div>
+                    <hr className="divider" style={{ margin: '10px 0' }} />
+                    <div className="stack-sm">
+                      <Link
+                        href="/team"
+                        className="btn btn-sm btn-ghost"
+                        style={{ justifyContent: 'flex-start' }}
+                        onClick={() => setOpenProfile(false)}
+                      >
+                        Team Hub &amp; Invites
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost btn-danger"
+                        style={{ justifyContent: 'flex-start' }}
+                        onClick={() => {
+                          setOpenProfile(false);
+                          logout();
+                        }}
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
               <button
                 type="button"
-                className="btn btn-sm"
-                onClick={logout}
-                title="Sign out"
-              >
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <div className="row" style={{ gap: 6 }}>
-              <button
-                type="button"
-                className="btn btn-sm"
+                className="btn btn-sm btn-primary"
                 onClick={() => openAuthModal('login')}
               >
                 Sign In
               </button>
+            )}
+
+            {/* iOS Minimalist Appearance & Theme Control Center */}
+            <div className="theme-menu-wrap" ref={themeRef}>
               <button
                 type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => openAuthModal('register')}
+                className={`theme-trigger ${openTheme ? 'active' : ''}`}
+                onClick={() => {
+                  setOpenTheme((v) => !v);
+                  setOpenProfile(false);
+                }}
+                aria-expanded={openTheme}
+                aria-label="Appearance and iOS Theme settings"
+                title="Appearance & Accent Theme"
               >
-                Create Account
+                {resolvedDark ? (
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32 1.41-1.41" />
+                  </svg>
+                )}
+                <span className="theme-trigger-dot" />
               </button>
-            </div>
-          )}
 
-          <span
-            className={`badge ${backend === 'supabase' ? 'badge-ok' : 'badge-muted'}`}
-            title={backend === 'supabase' ? 'Connected to Supabase PostgreSQL + Storage' : 'Using local .data fallback'}
-          >
-            <span className="badge-dot" />
-            {backend === 'supabase' ? 'Supabase' : 'Local'}
-          </span>
-          {mail !== 'console' && (
-            <span className="badge badge-primary" title={`Emails delivered via ${mail.toUpperCase()}`}>
-              {mail.toUpperCase()}
-            </span>
-          )}
-
-          {/* iOS Minimalist Appearance & Theme Control Center */}
-          <div className="theme-menu-wrap" ref={panelRef}>
-            <button
-              type="button"
-              className={`theme-trigger ${openPanel ? 'active' : ''}`}
-              onClick={() => setOpenPanel((v) => !v)}
-              aria-expanded={openPanel}
-              aria-label="Appearance and iOS Theme settings"
-              title="Appearance & Accent Theme"
-            >
-              {resolvedDark ? (
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32 1.41-1.41" />
-                </svg>
-              )}
-              <span className="theme-trigger-dot" />
-            </button>
-
-            {openPanel && (
-              <div className="theme-popover" role="dialog" aria-label="Appearance settings">
-                <div className="theme-popover-title">Appearance</div>
-                <div className="seg full">
-                  <button
-                    type="button"
-                    className={scheme === 'light' ? 'active' : ''}
-                    onClick={() => selectScheme('light')}
-                  >
-                    ☀ Light
-                  </button>
-                  <button
-                    type="button"
-                    className={scheme === 'dark' ? 'active' : ''}
-                    onClick={() => selectScheme('dark')}
-                  >
-                    ☾ Dark
-                  </button>
-                  <button
-                    type="button"
-                    className={scheme === 'system' ? 'active' : ''}
-                    onClick={() => selectScheme('system')}
-                    title={`System (currently ${sysDark ? 'Dark' : 'Light'})`}
-                  >
-                    Auto ({sysDark ? 'Dark' : 'Light'})
-                  </button>
-                </div>
-
-                <div className="theme-popover-title" style={{ marginTop: 10 }}>
-                  iOS Accent Tint
-                </div>
-                <div className="accent-row">
-                  {ACCENTS.map((a) => (
+              {openTheme && (
+                <div className="theme-popover" role="dialog" aria-label="Appearance settings">
+                  <div className="theme-popover-title">Appearance</div>
+                  <div className="seg full">
                     <button
-                      key={a.id}
                       type="button"
-                      className={`accent-pill ${accent === a.id ? 'active' : ''}`}
-                      onClick={() => selectAccent(a.id)}
-                      title={a.label}
+                      className={scheme === 'light' ? 'active' : ''}
+                      onClick={() => selectScheme('light')}
                     >
-                      <span className="accent-circle" style={{ background: a.color }} />
-                      <span>{a.label.replace('iOS ', '')}</span>
+                      ☀ Light
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className={scheme === 'dark' ? 'active' : ''}
+                      onClick={() => selectScheme('dark')}
+                    >
+                      ☾ Dark
+                    </button>
+                    <button
+                      type="button"
+                      className={scheme === 'system' ? 'active' : ''}
+                      onClick={() => selectScheme('system')}
+                      title={`System (currently ${sysDark ? 'Dark' : 'Light'})`}
+                    >
+                      Auto ({sysDark ? 'Dark' : 'Light'})
+                    </button>
+                  </div>
+
+                  <div className="theme-popover-title" style={{ marginTop: 10 }}>
+                    iOS Accent Tint
+                  </div>
+                  <div className="accent-row">
+                    {ACCENTS.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className={`accent-pill ${accent === a.id ? 'active' : ''}`}
+                        onClick={() => selectAccent(a.id)}
+                        title={a.label}
+                      >
+                        <span className="accent-circle" style={{ background: a.color }} />
+                        <span>{a.label.replace('iOS ', '')}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
-      </div>
       </header>
 
       {/* Frosted iOS Bottom Tab Bar for Mobile Devices (< 720px) */}
