@@ -42,10 +42,11 @@ export async function GET(req: Request) {
     ? roster.find((m) => m.email.toLowerCase() === sessionUser.email.toLowerCase()) ?? sessionUser
     : null;
 
+  // Only expose team roster when authenticated
   return Response.json(
     {
       user,
-      roster,
+      roster: user ? roster : [],
       invite,
     },
     { headers: { 'Cache-Control': 'no-store' } },

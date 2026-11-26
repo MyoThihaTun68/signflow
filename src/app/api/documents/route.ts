@@ -4,6 +4,7 @@ import { putObject, removeObject } from '@/lib/server/storage';
 import { randomRefCode, randomToken, sha256Hex } from '@/lib/server/crypto';
 import { baseUrl, cleanText, clientIp, isValidEmail, jsonError, userAgent } from '@/lib/server/http';
 import { sendMail, signRequestEmail } from '@/lib/server/mailer';
+import { readAuthSession } from '@/lib/server/team';
 import { normalizeRole, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -12,6 +13,7 @@ export const dynamic = 'force-dynamic';
 const MAX_PDF_BYTES = 4.3 * 1024 * 1024;
 
 export async function POST(req: Request) {
+  if (!readAuthSession(req)) return jsonError('Sign in required to create or send documents.', 401);
   let form: FormData;
   try {
     form = await req.formData();

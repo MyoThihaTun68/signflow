@@ -4,14 +4,15 @@ import { toPublicEvents } from '@/lib/server/documents';
 import { baseUrl, cleanText, isValidEmail, jsonError } from '@/lib/server/http';
 import { escapeHtml, sendMail } from '@/lib/server/mailer';
 import { supabaseAdmin } from '@/lib/server/supabase';
-import { createInviteToken, loadTeamRoster, removeTeamMember, upsertTeamMember } from '@/lib/server/team';
+import { createInviteToken, loadTeamRoster, readAuthSession, removeTeamMember, upsertTeamMember } from '@/lib/server/team';
 import { normalizeRole, roleLabel, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /** Returns the team roster, all documents with their signature chains, and recent org activity. */
-export async function GET() {
+export async function GET(req: Request) {
+  if (!readAuthSession(req)) return jsonError('Sign in required.', 401);
   const repo = getRepo();
   const [roster, docs, recentEvents] = await Promise.all([
     loadTeamRoster(),
@@ -65,6 +66,7 @@ export async function GET() {
 
 /** Creates/updates a team member by email & role, and optionally sends an email invitation. */
 export async function POST(req: Request) {
+  if (!readAuthSession(req)) return jsonError('Sign in required.', 401);
   const body = (await req.json().catch(() => ({}))) as {
     action?: unknown;
     id?: unknown;

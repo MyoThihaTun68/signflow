@@ -81,12 +81,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.invite && inv) {
         const info = data.invite as InviteInfo;
-        openAuthModal('register', { ...info, inviteToken: inv });
+        setMode('register');
+        setErr(null);
+        setPassword('');
+        setEmail(info.email || '');
+        setName(info.name || '');
+        setRole(info.role || 'director');
+        setDepartment(info.department || '');
+        setInviteToken(inv);
+        if (data.user) {
+          setModalOpen(true);
+        }
       }
     } finally {
       setLoading(false);
     }
-  }, [openAuthModal]);
+  }, []);
 
   useEffect(() => {
     refreshAuth();
@@ -147,6 +157,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.roster) setRoster(data.roster);
       setModalOpen(false);
       setInviteToken('');
+      setPassword('');
+      if (typeof window !== 'undefined' && window.location.search.includes('invite=')) {
+        const u = new URL(window.location.href);
+        u.searchParams.delete('invite');
+        window.history.replaceState({}, '', u.pathname + u.search + u.hash);
+      }
       toast(
         mode === 'register'
           ? `Account created! Signed in as ${data.user.name} (${roleLabel(data.user.role)})`
@@ -160,135 +176,207 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const authFormContent = (
+    <>
+      <div className="seg full">
+        <button
+          type="button"
+          className={mode === 'login' ? 'active' : ''}
+          onClick={() => {
+            setMode('login');
+            setErr(null);
+          }}
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          className={mode === 'register' ? 'active' : ''}
+          onClick={() => {
+            setMode('register');
+            setErr(null);
+          }}
+        >
+          Create Account
+        </button>
+      </div>
+
+      <form className="stack" onSubmit={handleSubmit}>
+        {mode === 'register' && (
+          <>
+            <label className="field">
+              <span>Your Full Name</span>
+              <input
+                className="input"
+                required
+                placeholder="e.g. Khamla Vongsa"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+
+            <div className="field">
+              <span>Your Role (or click + Custom to add your own)</span>
+              <RolePicker
+                value={role}
+                onChange={setRole}
+                extraRoles={roster.map((m) => m.role)}
+                allowDeleteCustom
+              />
+            </div>
+          </>
+        )}
+
+        <label className="field">
+          <span>Email Address</span>
+          <input
+            className="input"
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="you@company.la"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+
+        <label className="field">
+          <span>{mode === 'register' ? 'Create Password (min 4 chars)' : 'Password'}</span>
+          <input
+            className="input"
+            type="password"
+            required
+            minLength={4}
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+
+        {mode === 'register' && (
+          <label className="field">
+            <span>Department / Title (optional)</span>
+            <input
+              className="input"
+              placeholder={`e.g. ${roleLabel(role)} Department`}
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+            />
+          </label>
+        )}
+
+        {err && <div className="alert alert-danger">{err}</div>}
+
+        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={submitting}>
+          {submitting
+            ? 'Please wait...'
+            : mode === 'register'
+              ? 'Create Account & Continue'
+              : 'Sign In to SignFlow'}
+        </button>
+      </form>
+    </>
+  );
+
   return (
     <AuthCtx.Provider value={{ user, roster, loading, openAuthModal, logout, refreshAuth, saveSignature }}>
-      {children}
-
-      {modalOpen && (
-        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <div
-            className="modal stack"
-            style={{ maxWidth: 460 }}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="Sign in or create account"
-          >
-            <div className="row-between">
-              <div>
-                <h2>{mode === 'register' ? 'First-Time Account Setup' : 'Sign In with Email'}</h2>
-                <p className="muted small">
-                  {inviteToken
-                    ? 'You were invited to the organization! Set your password below to activate your account.'
-                    : mode === 'register'
-                      ? 'Create your organization account with your email & role. Next time, sign in with one click.'
-                      : 'Sign in with your email to prepare, trace, chat, and sign team papers.'}
-                </p>
-              </div>
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setModalOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="seg full">
-              <button
-                type="button"
-                className={mode === 'login' ? 'active' : ''}
-                onClick={() => {
-                  setMode('login');
-                  setErr(null);
-                }}
+      {loading ? (
+        <div className="auth-gate-shell">
+          <div className="auth-gate-loader">
+            <span className="brand-mark auth-gate-mark" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                width="24"
+                height="24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                Sign In (Existing User)
-              </button>
-              <button
-                type="button"
-                className={mode === 'register' ? 'active' : ''}
-                onClick={() => {
-                  setMode('register');
-                  setErr(null);
-                }}
-              >
-                First-Time Create Account
-              </button>
-            </div>
-
-            <form className="stack" onSubmit={handleSubmit}>
-              {mode === 'register' && (
-                <>
-                  <label className="field">
-                    <span>Your Full Name</span>
-                    <input
-                      className="input"
-                      required
-                      placeholder="e.g. Khamla Vongsa"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                  </label>
-
-                  <div className="field">
-                    <span>Your Organization Role (or click + Custom to add your own)</span>
-                    <RolePicker
-                      value={role}
-                      onChange={setRole}
-                      extraRoles={roster.map((m) => m.role)}
-                      allowDeleteCustom
-                    />
-                  </div>
-                </>
-              )}
-
-              <label className="field">
-                <span>Email Address</span>
-                <input
-                  className="input"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  placeholder="you@company.la"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-
-              <label className="field">
-                <span>{mode === 'register' ? 'Create Password (min 4 chars)' : 'Password'}</span>
-                <input
-                  className="input"
-                  type="password"
-                  required
-                  minLength={4}
-                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </label>
-
-              {mode === 'register' && (
-                <label className="field">
-                  <span>Department / Title (optional)</span>
-                  <input
-                    className="input"
-                    placeholder={`e.g. ${roleLabel(role)} Department`}
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                  />
-                </label>
-              )}
-
-              {err && <div className="alert alert-danger">{err}</div>}
-
-              <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={submitting}>
-                {submitting
-                  ? 'Please wait...'
-                  : mode === 'register'
-                    ? 'Create Account & Sign In'
-                    : 'Sign In to Workspace'}
-              </button>
-            </form>
+                <path d="M3 17c3-4 5-9 7-9s-1 9 2 9 3-5 5-5 2 3 4 3" />
+              </svg>
+            </span>
+            <div style={{ fontWeight: 650, fontSize: '1.05rem' }}>SignFlow</div>
+            <div className="small muted">Checking your session…</div>
           </div>
         </div>
+      ) : !user ? (
+        <div className="auth-gate-shell">
+          <div className="auth-gate-card stack" role="main" aria-label="Sign in or create account">
+            <div className="auth-gate-brand">
+              <span className="brand-mark auth-gate-mark" aria-hidden>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 17c3-4 5-9 7-9s-1 9 2 9 3-5 5-5 2 3 4 3" />
+                </svg>
+              </span>
+              <h1>SignFlow</h1>
+              <p className="muted small">
+                {inviteToken
+                  ? 'You were invited to the organization! Set your password below to activate your account.'
+                  : mode === 'register'
+                    ? 'Create your account to scan, sign, and verify organization documents.'
+                    : 'Sign in with your organization account to continue.'}
+              </p>
+            </div>
+
+            {inviteToken && (
+              <div className="alert alert-ok small">
+                Invite verified for <strong>{email}</strong> ({roleLabel(role)}). Choose a password to activate.
+              </div>
+            )}
+
+            {authFormContent}
+
+            <div className="auth-gate-foot muted small">
+              Protected Workspace · SHA-256 Document Ledger
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {children}
+
+          {modalOpen && (
+            <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
+              <div
+                className="modal stack"
+                style={{ maxWidth: 460 }}
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-label="Sign in or create account"
+              >
+                <div className="row-between">
+                  <div>
+                    <h2>{mode === 'register' ? 'First-Time Account Setup' : 'Sign In with Email'}</h2>
+                    <p className="muted small">
+                      {inviteToken
+                        ? 'You were invited to the organization! Set your password below to activate your account.'
+                        : mode === 'register'
+                          ? 'Create your organization account with your email & role.'
+                          : 'Sign in with your email to prepare, trace, chat, and sign team papers.'}
+                    </p>
+                  </div>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setModalOpen(false)}>
+                    ✕
+                  </button>
+                </div>
+
+                {authFormContent}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </AuthCtx.Provider>
   );
