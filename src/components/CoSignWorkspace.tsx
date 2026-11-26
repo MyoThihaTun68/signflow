@@ -7,6 +7,7 @@ import { PdfCanvasViewer } from '@/components/PdfCanvasViewer';
 import { RolePicker, useCustomRoles } from '@/components/RolePicker';
 import { SignatureCreator } from '@/components/SignatureCreator';
 import { useToast } from '@/components/Toast';
+import { uid } from '@/lib/client/image';
 import {
   roleLabel,
   type Decision,
@@ -15,26 +16,37 @@ import {
   type TeamMember,
 } from '@/lib/types';
 
+interface LocalStamp {
+  id: string;
+  page: number;
+  cx: number;
+  cy: number;
+  widthFrac: number;
+}
+
 export function CoSignWorkspace({ token }: { token: string }) {
   const { toast } = useToast();
-  const { user, openAuthModal } = useAuth();
+  const { user, openAuthModal, saveSignature } = useAuth();
 
   const [doc, setDoc] = useState<PublicDocument | null>(null);
   const [roster, setRoster] = useState<TeamMember[]>([]);
+  const [nextPendingToken, setNextPendingToken] = useState<{ token: string; title: string } | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [page, setPage] = useState(0);
-  const [stampPos, setStampPos] = useState<{ page: number; cx: number; cy: number }>({ page: 0, cx: 0.72, cy: 0.82 });
-  const [widthFrac, setWidthFrac] = useState(0.24);
+  const [stamps, setStamps] = useState<LocalStamp[]>([
+    { id: 'stamp-1', page: 0, cx: 0.72, cy: 0.82, widthFrac: 0.24 },
+  ]);
+  const [activeStampId, setActiveStampId] = useState<string>('stamp-1');
   const [decision, setDecision] = useState<Decision>('approved');
   const [note, setNote] = useState('');
   const [signerRole, setSignerRole] = useState<OrgRole>('director');
   const [signerName, setSignerName] = useState('');
   const [signerEmail, setSignerEmail] = useState('');
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
+  const [editingNewSig, setEditingNewSig] = useState(false);
 
-  // Easy 1-click routing: either "Finish & Complete" or "Send Next to <Role>"
   const [nextTarget, setNextTarget] = useState<'finish' | OrgRole>('finish');
   const [showHistory, setShowHistory] = useState(false);
   const { allRoles } = useCustomRoles(roster.map((m) => m.role));
@@ -69,6 +81,13 @@ export function CoSignWorkspace({ token }: { token: string }) {
         if (teamRes && teamRes.ok) {
           const tData = await teamRes.json();
           if (tData?.roster?.length) setRoster(tData.roster as TeamMember[]);
+          if (Array.isArray(tData?.documents)) {
+            const otherPending = tData.documents.find(
+              (d: { signToken: string; status: string; title: string }) =>
+                d.signToken !== token && d.status === 'pending_cosign',
+            );
+            if (otherPending) setNextPendingToken({ token: otherPending.signToken, title: otherPending.title });
+          }
         }
 
         if (!viewedLogged.current) {
@@ -89,13 +108,17 @@ export function CoSignWorkspace({ token }: { token: string }) {
     };
   }, [token]);
 
+  // Auto-load signed-in user identity AND saved 1-click signature!
   useEffect(() => {
     if (user) {
       setSignerRole(user.role);
       setSignerName(user.name);
       setSignerEmail(user.email);
+      if (user.savedSignature && !signaturePng && !editingNewSig) {
+        setSignaturePng(user.savedSignature);
+      }
     }
-  }, [user]);
+  }, [user, signaturePng, editingNewSig]);
 
   const switchActiveRole = (role: OrgRole) => {
     setSignerRole(role);
@@ -107,6 +130,33 @@ export function CoSignWorkspace({ token }: { token: string }) {
       setSignerName(roleLabel(role));
       setSignerEmail(`${role.toLowerCase().replace(/\s+/g, '.')}@signflow.org`);
     }
+  };
+
+  const addAnotherStamp = () => {
+    const id = `stamp-${uid().slice(0, 6)}`;
+    const nextCx = stamps.length % 2 === 0 ? 0.28 : 0.72;
+    const nextCy = Math.max(0.2, 0.82 - (stamps.length % 3) * 0.14);
+    setStamps((prev) => [...prev, { id, page, cx: nextCx, cy: nextCy, widthFrac: 0.22 }]);
+    setActiveStampId(id);
+    toast(`Added stamp #${stamps.length + 1} on page ${page + 1} — drag or resize its corner`, 'info');
+  };
+
+  const updateStampPos = (p: number, cx: number, cy: number, sid?: string) => {
+    const targetId = sid || activeStampId;
+    setStamps((prev) => prev.map((s) => (s.id === targetId ? { ...s, page: p, cx, cy } : s)));
+  };
+
+  const updateStampSize = (widthFrac: number, sid?: string) => {
+    const targetId = sid || activeStampId;
+    setStamps((prev) => prev.map((s) => (s.id === targetId ? { ...s, widthFrac } : s)));
+  };
+
+  const removeStamp = (sid: string) => {
+    setStamps((prev) => {
+      const next = prev.filter((s) => s.id !== sid);
+      if (next.length && activeStampId === sid) setActiveStampId(next[0].id);
+      return next.length ? next : prev;
+    });
   };
 
   const sealDocument = async () => {
@@ -124,10 +174,13 @@ export function CoSignWorkspace({ token }: { token: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           signature: signaturePng,
-          page: stampPos.page,
-          cx: stampPos.cx,
-          cy: stampPos.cy,
-          widthFrac,
+          stamps: stamps.map((s) => ({
+            page: s.page,
+            cx: s.cx,
+            cy: s.cy,
+            widthFrac: s.widthFrac,
+            signature: signaturePng,
+          })),
           decision,
           note: note.trim() || null,
           signerName: signerName.trim() || roleLabel(signerRole),
@@ -147,7 +200,6 @@ export function CoSignWorkspace({ token }: { token: string }) {
         if (data.forwardedToRole) {
           switchActiveRole(data.forwardedToRole as OrgRole);
           setNextTarget('finish');
-          setSignaturePng(null);
           setNote('');
           toast(`Stamped & sent to ${roleLabel(data.forwardedToRole)}!`, 'ok');
         } else {
@@ -219,16 +271,17 @@ export function CoSignWorkspace({ token }: { token: string }) {
   }
 
   const isDone = doc.status === 'completed' || doc.status === 'rejected';
+  const activeStamp = stamps.find((s) => s.id === activeStampId) ?? stamps[0];
 
   return (
     <div className="stack">
-      {/* ── Clear Visual Progress Tracker: HR -> Director -> Boss -> Done ── */}
+      {/* ── Clear Visual Progress Tracker ── */}
       <div className="card row-between" style={{ padding: '14px 20px' }}>
         <div className="row" style={{ gap: 10 }}>
           <code>{doc.refCode}</code>
           <strong style={{ fontSize: '1.05rem' }}>{doc.title}</strong>
           <span className="muted">·</span>
-          <span className="badge badge-muted">Prepared by {roleLabel(doc.senderRole)}</span>
+          <span className="badge badge-muted">From {roleLabel(doc.senderRole)}</span>
           <span>→</span>
           {doc.signatures.map((s, i) => (
             <span key={i} className="badge badge-ok">
@@ -253,23 +306,32 @@ export function CoSignWorkspace({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="grid-2">
-        {/* ── Left: Paper Preview + Simple Team Chat ── */}
+      {/* ── Split Workspace: 70% Paper Left / Compact Floating Inspector Right ── */}
+      <div className="grid-split">
         <div className="stack">
           <div className="card stack">
             <div className="row-between">
-              <h2>{isDone ? 'Signed Paper' : 'Click Anywhere on the Paper to Move Your Signature'}</h2>
-              {!isDone && (
-                <div className="seg">
-                  <button type="button" onClick={() => setStampPos({ page, cx: 0.25, cy: 0.82 })}>
-                    Left
+              <h2>
+                {isDone
+                  ? 'Signed Paper'
+                  : 'Tap Page to Move · Drag Blue Corner Dot to Resize'}
+              </h2>
+              {!isDone && signaturePng && (
+                <div className="row">
+                  <button type="button" className="btn btn-sm btn-primary" onClick={addAnotherStamp}>
+                    + Add Stamp ({stamps.length})
                   </button>
-                  <button type="button" onClick={() => setStampPos({ page, cx: 0.5, cy: 0.82 })}>
-                    Center
-                  </button>
-                  <button type="button" onClick={() => setStampPos({ page, cx: 0.75, cy: 0.82 })}>
-                    Right
-                  </button>
+                  <div className="seg">
+                    <button type="button" onClick={() => updateStampPos(page, 0.25, 0.82)}>
+                      Left
+                    </button>
+                    <button type="button" onClick={() => updateStampPos(page, 0.5, 0.82)}>
+                      Center
+                    </button>
+                    <button type="button" onClick={() => updateStampPos(page, 0.75, 0.82)}>
+                      Right
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -279,18 +341,23 @@ export function CoSignWorkspace({ token }: { token: string }) {
               page={page}
               onPageChange={setPage}
               interactive={!isDone && Boolean(signaturePng)}
-              onPlace={(p, cx, cy) => setStampPos({ page: p, cx, cy })}
-              stamp={
+              stamps={
                 !isDone && signaturePng
-                  ? {
-                      page: stampPos.page,
-                      cx: stampPos.cx,
-                      cy: stampPos.cy,
-                      widthFrac,
+                  ? stamps.map((s) => ({
+                      id: s.id,
+                      page: s.page,
+                      cx: s.cx,
+                      cy: s.cy,
+                      widthFrac: s.widthFrac,
                       png: signaturePng,
-                    }
-                  : null
+                    }))
+                  : []
               }
+              activeStampId={activeStampId}
+              onSelectStamp={setActiveStampId}
+              onRemoveStamp={removeStamp}
+              onPlace={updateStampPos}
+              onResize={updateStampSize}
             />
           </div>
 
@@ -363,7 +430,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
           </div>
         </div>
 
-        {/* ── Right: Super Simple 3-Step Signing Panel ── */}
+        {/* ── Right: Compact Floating iOS Inspector ── */}
         <div className="stack sticky">
           {isDone ? (
             <div className="card card-hero stack">
@@ -374,6 +441,11 @@ export function CoSignWorkspace({ token }: { token: string }) {
               <a className="btn btn-primary btn-lg btn-block" href={`/api/documents/${token}/file?type=final&download=1`}>
                 Download Signed PDF
               </a>
+              {nextPendingToken && (
+                <Link className="btn btn-lg btn-block" href={`/sign/${nextPendingToken.token}`}>
+                  Next Pending Paper: {nextPendingToken.title} →
+                </Link>
+              )}
               <Link className="btn btn-block" href="/team">
                 Back to Team Hub
               </Link>
@@ -393,9 +465,9 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 )}
               </div>
 
-              {/* 1. Who are you signing as? (Director / Boss / HR / Finance + Custom) */}
+              {/* 1. Role */}
               <div className="field">
-                <span>1. Your Role (Director / Boss / HR / Finance or + Custom)</span>
+                <span>1. Your Role</span>
                 <RolePicker
                   value={signerRole}
                   onChange={switchActiveRole}
@@ -423,25 +495,77 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 </label>
               </div>
 
-              {/* 2. Draw or Type Signature */}
+              {/* 2. Saved 1-Click Signature OR Signature Creator */}
               <div className="field">
-                <span>2. Your Signature (Draw, Type, or Photo)</span>
-                <SignatureCreator allowPhoto defaultText={signerName} value={signaturePng} onChange={setSignaturePng} />
+                <div className="row-between">
+                  <span>2. Your Signature</span>
+                  {user && signaturePng && user.savedSignature !== signaturePng && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => saveSignature(signaturePng)}
+                    >
+                      ★ Save to My Profile
+                    </button>
+                  )}
+                </div>
+
+                {user?.savedSignature && !editingNewSig ? (
+                  <div className="stack-sm">
+                    <div className="sig-preview">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={user.savedSignature} alt="Your saved signature" />
+                    </div>
+                    <div className="row-between">
+                      <span className="badge badge-ok">⚡ 1-Click Saved Signature Loaded</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => setEditingNewSig(true)}
+                      >
+                        Draw / Upload New
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="stack-sm">
+                    <SignatureCreator
+                      allowPhoto
+                      defaultText={signerName}
+                      value={signaturePng}
+                      onChange={setSignaturePng}
+                    />
+                    {user?.savedSignature && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          setSignaturePng(user.savedSignature ?? null);
+                          setEditingNewSig(false);
+                        }}
+                      >
+                        ← Use My Saved Signature
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <label className="field">
-                <span>Signature Size</span>
-                <div className="range-row">
-                  <input
-                    type="range"
-                    min={12}
-                    max={45}
-                    value={Math.round(widthFrac * 100)}
-                    onChange={(e) => setWidthFrac(Number(e.target.value) / 100)}
-                  />
-                  <output>{Math.round(widthFrac * 100)}%</output>
-                </div>
-              </label>
+              {activeStamp && (
+                <label className="field">
+                  <span>Stamp Size (or drag corner dot on paper)</span>
+                  <div className="range-row">
+                    <input
+                      type="range"
+                      min={10}
+                      max={50}
+                      value={Math.round(activeStamp.widthFrac * 100)}
+                      onChange={(e) => updateStampSize(Number(e.target.value) / 100)}
+                    />
+                    <output>{Math.round(activeStamp.widthFrac * 100)}%</output>
+                  </div>
+                </label>
+              )}
 
               <label className="field">
                 <span>Short Note (optional)</span>
@@ -453,7 +577,7 @@ export function CoSignWorkspace({ token }: { token: string }) {
                 />
               </label>
 
-              {/* 3. Finish or Pass to Another Role? */}
+              {/* 3. Finish or Pass to Another Role */}
               {decision !== 'rejected' && (
                 <div className="field">
                   <span>3. After You Sign:</span>

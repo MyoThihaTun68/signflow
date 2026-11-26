@@ -7,6 +7,7 @@ import {
   loadTeamRoster,
   readAuthSession,
   registerOrActivateMember,
+  saveMemberSignature,
   verifyInviteToken,
 } from '@/lib/server/team';
 import { normalizeRole, roleLabel, type OrgRole } from '@/lib/types';
@@ -51,7 +52,7 @@ export async function GET(req: Request) {
   );
 }
 
-/** POST /api/auth -> action: 'register' | 'login' | 'logout' */
+/** POST /api/auth -> action: 'register' | 'login' | 'logout' | 'save_signature' */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
     action?: unknown;
@@ -61,6 +62,7 @@ export async function POST(req: Request) {
     role?: unknown;
     department?: unknown;
     inviteToken?: unknown;
+    signature?: unknown;
   };
 
   const action = cleanText(body.action, 32);
@@ -70,6 +72,17 @@ export async function POST(req: Request) {
       { user: null },
       { headers: { 'Set-Cookie': makeCookieHeader(req, '', 0) } },
     );
+  }
+
+  if (action === 'save_signature') {
+    const sessionUser = readAuthSession(req);
+    if (!sessionUser) return jsonError('Sign in first to save your signature.', 401);
+    const sig = typeof body.signature === 'string' ? body.signature : null;
+    if (sig && (!sig.startsWith('data:image/png;base64,') || sig.length > 2_000_000)) {
+      return jsonError('Invalid signature image.');
+    }
+    const updated = await saveMemberSignature(sessionUser.email, sig);
+    return Response.json({ user: updated ?? sessionUser });
   }
 
   const email = cleanText(body.email, 254).toLowerCase();

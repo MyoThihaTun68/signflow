@@ -19,6 +19,7 @@ interface AuthContextValue {
   openAuthModal(mode?: 'login' | 'register', prefill?: Partial<InviteInfo> & { inviteToken?: string }): void;
   logout(): Promise<void>;
   refreshAuth(): Promise<void>;
+  saveSignature(png: string | null): Promise<void>;
 }
 
 const AuthCtx = createContext<AuthContextValue>({
@@ -28,6 +29,7 @@ const AuthCtx = createContext<AuthContextValue>({
   openAuthModal: () => undefined,
   logout: async () => undefined,
   refreshAuth: async () => undefined,
+  saveSignature: async () => undefined,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -100,6 +102,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     toast('Signed out', 'info');
   }, [toast]);
 
+  const saveSignature = useCallback(
+    async (png: string | null) => {
+      if (!user) return;
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_signature', signature: png }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) setUser(data.user);
+          toast(png ? 'Signature saved to your profile for 1-click stamping!' : 'Saved signature cleared', 'ok');
+        }
+      } catch {
+        toast('Could not save signature', 'err');
+      }
+    },
+    [user, toast],
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -138,7 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, roster, loading, openAuthModal, logout, refreshAuth }}>
+    <AuthCtx.Provider value={{ user, roster, loading, openAuthModal, logout, refreshAuth, saveSignature }}>
       {children}
 
       {modalOpen && (

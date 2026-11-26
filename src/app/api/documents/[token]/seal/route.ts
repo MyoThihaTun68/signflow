@@ -21,12 +21,22 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
+interface StampPayload {
+  page?: unknown;
+  cx?: unknown;
+  cy?: unknown;
+  widthFrac?: unknown;
+  signature?: unknown;
+}
+
 interface SealBody {
   signature?: unknown;
   page?: unknown;
   cx?: unknown;
   cy?: unknown;
   widthFrac?: unknown;
+  /** Optional array of stamps (supports placing multiple stamps across pages in one seal) */
+  stamps?: StampPayload[];
   decision?: unknown;
   note?: unknown;
   signerName?: unknown;
@@ -57,10 +67,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const decision = (['approved', 'approved_with_notes', 'rejected'] as const).find((d) => d === body.decision) as
     | Decision
     | undefined;
-  const page = num(body.page, 0, 10_000);
-  const cx = num(body.cx, 0, 1);
-  const cy = num(body.cy, 0, 1);
-  const widthFrac = num(body.widthFrac, 0.04, 0.9);
   const note = cleanText(body.note, 600) || null;
   const signerName = cleanText(body.signerName, 120) || doc.signer2_name || doc.signer2_email || 'Team Signer';
   const signerEmail = cleanText(body.signerEmail, 254).toLowerCase() || doc.signer2_email || 'signer@signflow.org';
@@ -73,11 +79,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const forwardToEmail = cleanText(body.forwardToEmail, 254).toLowerCase() || null;
   const isForwarding = Boolean(forwardToRole && decision !== 'rejected');
 
+  // Support either multi-stamp `stamps[]` array or single stamp fields
+  const rawStamps: StampPayload[] =
+    Array.isArray(body.stamps) && body.stamps.length > 0
+      ? body.stamps.slice(0, 20)
+      : [{ page: body.page, cx: body.cx, cy: body.cy, widthFrac: body.widthFrac, signature }];
+
+  const validStamps: { page: number; cx: number; cy: number; widthFrac: number; signature: string }[] = [];
+  for (const s of rawStamps) {
+    const sp = num(s.page, 0, 10_000);
+    const scx = num(s.cx, 0, 1);
+    const scy = num(s.cy, 0, 1);
+    const sw = num(s.widthFrac, 0.04, 0.9);
+    const ssig = typeof s.signature === 'string' ? s.signature : signature;
+    if (sp === null || scx === null || scy === null || sw === null) return jsonError('Invalid stamp position.');
+    if (!ssig.startsWith('data:image/png;base64,') || ssig.length > 2_500_000)
+      return jsonError('Signature must be a PNG image under ~1.8 MB.');
+    validStamps.push({ page: Math.floor(sp), cx: scx, cy: scy, widthFrac: sw, signature: ssig });
+  }
+
   if (!decision) return jsonError('Choose a decision.');
   if (decision === 'approved_with_notes' && !note) return jsonError('Add a note for "Approved w/ Notes".');
-  if (page === null || cx === null || cy === null || widthFrac === null) return jsonError('Invalid stamp position.');
-  if (!signature.startsWith('data:image/png;base64,') || signature.length > 2_500_000)
-    return jsonError('Signature must be a PNG image under ~1.8 MB.');
   if (isForwarding && forwardToEmail && !isValidEmail(forwardToEmail))
     return jsonError('Enter a valid email for the next approver.');
 
@@ -94,15 +116,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   } catch {
     return jsonError('PDF could not be parsed.', 500);
   }
-  const pageIndex = Math.floor(page);
-  if (pageIndex >= pdf.getPageCount()) return jsonError('Page out of range.');
 
-  // Embed ONLY the pure transparent signature image on the page (no extra text/email/timestamp lines on the PDF)
-  let stamp;
-  try {
-    stamp = await drawStamp(pdf, pageIndex, dataUrlToBytes(signature), { cx, cy, widthFrac }, []);
-  } catch {
-    return jsonError('Signature image could not be embedded.', 400);
+  // Embed ONLY the pure transparent signature image(s) on the page(s)
+  let stamp = { x: 0, y: 0, width: 0, height: 0 };
+  const pageIndex = validStamps[0].page;
+  const cx = validStamps[0].cx;
+  const cy = validStamps[0].cy;
+  const widthFrac = validStamps[0].widthFrac;
+
+  for (const item of validStamps) {
+    if (item.page >= pdf.getPageCount()) return jsonError('Page out of range.');
+    try {
+      stamp = await drawStamp(
+        pdf,
+        item.page,
+        dataUrlToBytes(item.signature),
+        { cx: item.cx, cy: item.cy, widthFrac: item.widthFrac },
+        [],
+      );
+    } catch {
+      return jsonError('Signature image could not be embedded.', 400);
+    }
   }
 
   const signedContent = await pdf.save();

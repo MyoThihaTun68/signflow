@@ -50,6 +50,7 @@ export function toPublicMember(m: StoredTeamMember): TeamMember {
     role: m.role,
     department: m.department,
     status: m.passwordHash ? 'active' : m.status || 'invited',
+    savedSignature: m.savedSignature ?? null,
     createdAt: m.createdAt,
     lastLoginAt: m.lastLoginAt ?? null,
   };
@@ -178,6 +179,16 @@ export async function removeTeamMember(id: string): Promise<TeamMember[]> {
   const next = roster.filter((m) => m.id !== id);
   await saveStoredRoster(next);
   return next.map(toPublicMember);
+}
+
+export async function saveMemberSignature(email: string, signaturePng: string | null): Promise<TeamMember | null> {
+  const roster = await loadStoredRoster();
+  const cleanEmail = email.toLowerCase().trim();
+  const idx = roster.findIndex((m) => m.email.toLowerCase() === cleanEmail);
+  if (idx < 0) return null;
+  roster[idx].savedSignature = signaturePng;
+  await saveStoredRoster(roster);
+  return toPublicMember(roster[idx]);
 }
 
 /* ── Signed Auth Session Cookie & Email Invite Token ── */

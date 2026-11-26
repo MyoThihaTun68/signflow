@@ -812,16 +812,131 @@ input[type='range'] { width: 100%; accent-color: var(--primary); cursor: pointer
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Split Workspace (70% Paper Left / Compact 340px Floating Inspector Right) ── */
+.grid-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+/* ── Live Red Notification Pill in Nav ── */
+.nav-notif-pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Direct Corner-Resize Dot & Delete Dot on PDF Signature Stamp ── */
+.pdf-stamp.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-100);
+}
+.stamp-resize-dot {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2.5px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  cursor: nwse-resize;
+  touch-action: none;
+  transition: transform 0.15s var(--ease-out);
+}
+.stamp-resize-dot:hover {
+  transform: scale(1.22);
+}
+.stamp-delete-dot {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
+}
+
+/* ── Frosted iOS Mobile Bottom Tab Bar (< 720px) ── */
+.mobile-tabbar {
+  display: none;
+}
+
 @media (max-width: 1020px) {
-  .grid-2, .grid-2-even { grid-template-columns: 1fr; }
+  .grid-2, .grid-2-even, .grid-split { grid-template-columns: 1fr; }
   .sticky { position: static; }
 }
 @media (max-width: 720px) {
-  .topbar-inner { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
-  .tabs { order: 3; width: 100%; overflow-x: auto; }
-  .tab { padding: 7px 10px; font-size: 0.84rem; flex: 1; justify-content: center; }
-  .container { padding: 18px 14px 48px; }
+  .topbar-inner { flex-wrap: nowrap; gap: 10px; padding: 10px 14px; }
+  .topbar .tabs { display: none; }
+  .container { padding: 16px 14px 94px; }
+  .site-footer { padding-bottom: 84px; }
   .fields-2 { grid-template-columns: 1fr; }
   .kv { grid-template-columns: 1fr; }
   .decisions { grid-template-columns: 1fr; }
+  .toast-stack { bottom: 78px; right: 12px; left: 12px; max-width: none; }
+
+  .mobile-tabbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 80;
+    padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface-glass);
+    backdrop-filter: saturate(1.9) blur(22px);
+    -webkit-backdrop-filter: saturate(1.9) blur(22px);
+    border-top: 1px solid var(--border-strong);
+  }
+  .m-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 620;
+    text-decoration: none;
+    padding: 2px 0;
+  }
+  .m-tab:hover { text-decoration: none; }
+  .m-tab.active { color: var(--primary); }
+  .m-tab-icon-wrap { position: relative; display: inline-flex; }
+  .m-tab-badge {
+    position: absolute;
+    top: -4px;
+    right: -9px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 0.64rem;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
 }

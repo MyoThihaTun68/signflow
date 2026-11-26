@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { openPdf, type PdfJsDocument, type PdfJsRenderTask } from '@/lib/client/pdfjs';
 
 export interface StampOverlay {
+  id?: string;
   page: number;
   cx: number;
   cy: number;
@@ -18,12 +19,32 @@ interface Props {
   page: number;
   onPageChange(page: number): void;
   onPageCount?(count: number): void;
+  /** Single stamp (legacy) */
   stamp?: StampOverlay | null;
+  /** Multiple stamps across pages */
+  stamps?: StampOverlay[];
+  activeStampId?: string | null;
+  onSelectStamp?(id: string): void;
+  onRemoveStamp?(id: string): void;
   interactive?: boolean;
-  onPlace?(page: number, cx: number, cy: number): void;
+  onPlace?(page: number, cx: number, cy: number, stampId?: string): void;
+  onResize?(widthFrac: number, stampId?: string): void;
 }
 
-export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, interactive, onPlace }: Props) {
+export function PdfCanvasViewer({
+  data,
+  page,
+  onPageChange,
+  onPageCount,
+  stamp,
+  stamps,
+  activeStampId,
+  onSelectStamp,
+  onRemoveStamp,
+  interactive,
+  onPlace,
+  onResize,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const pageBoxRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -31,18 +52,20 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
   const taskRef = useRef<PdfJsRenderTask | null>(null);
 
   const [numPages, setNumPages] = useState(0);
-  const [boxWidth, setBoxWidth] = useState(720);
+  const [boxWidth, setBoxWidth] = useState(760);
   const [zoom, setZoom] = useState(1);
   const [pageCss, setPageCss] = useState<{ w: number; h: number }>({ w: 600, h: 800 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const allStamps: StampOverlay[] = stamps ?? (stamp ? [stamp] : []);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
-      if (w) setBoxWidth(Math.max(260, Math.min(860, w - 36)));
+      if (w) setBoxWidth(Math.max(260, Math.min(960, w - 36)));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -93,7 +116,7 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
         const pdfPage = await doc.getPage(safePage + 1);
         if (cancelled) return;
         const base = pdfPage.getViewport({ scale: 1 });
-        const cssW = Math.min(boxWidth, 820) * zoom;
+        const cssW = Math.min(boxWidth, 920) * zoom;
         const cssScale = cssW / base.width;
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const viewport = pdfPage.getViewport({ scale: cssScale * dpr });
@@ -115,15 +138,16 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
     };
   }, [page, numPages, boxWidth, zoom]);
 
-  const placeAtClient = (clientX: number, clientY: number) => {
+  const placeAtClient = (clientX: number, clientY: number, stampId?: string) => {
     if (!interactive || !onPlace || !pageBoxRef.current) return;
     const r = pageBoxRef.current.getBoundingClientRect();
     const cx = Math.min(0.95, Math.max(0.05, (clientX - r.left) / r.width));
     const cy = Math.min(0.95, Math.max(0.05, (clientY - r.top) / r.height));
-    onPlace(page, cx, cy);
+    onPlace(page, cx, cy, stampId);
   };
 
-  const dragging = useRef(false);
+  const draggingId = useRef<string | null>(null);
+  const resizingRef = useRef<{ id?: string; startX: number; startW: number } | null>(null);
 
   return (
     <div className="pdf-viewer" ref={wrapRef}>
@@ -134,17 +158,20 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
               ← Prev
             </button>
             <div className="pdf-thumbs" aria-label="Jump to page">
-              {Array.from({ length: numPages }, (_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={`pdf-thumb-pill ${page === i ? 'active' : ''}`}
-                  onClick={() => onPageChange(i)}
-                >
-                  {i + 1}
-                  {stamp && stamp.page === i ? ' ✦' : ''}
-                </button>
-              ))}
+              {Array.from({ length: numPages }, (_, i) => {
+                const countOnPage = allStamps.filter((s) => s.page === i).length;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    className={`pdf-thumb-pill ${page === i ? 'active' : ''}`}
+                    onClick={() => onPageChange(i)}
+                  >
+                    {i + 1}
+                    {countOnPage > 0 ? ` ✦${countOnPage > 1 ? countOnPage : ''}` : ''}
+                  </button>
+                );
+              })}
             </div>
             <button
               type="button"
@@ -165,12 +192,7 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
             >
               −
             </button>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => setZoom(1)}
-              title="Reset zoom to fit width"
-            >
+            <button type="button" className="btn btn-sm" onClick={() => setZoom(1)} title="Reset zoom">
               {Math.round(zoom * 100)}%
             </button>
             <button
@@ -200,40 +222,92 @@ export function PdfCanvasViewer({ data, page, onPageChange, onPageCount, stamp, 
             ref={pageBoxRef}
             className={`pdf-page ${interactive ? 'placing' : ''}`}
             style={{ width: pageCss.w, height: pageCss.h }}
-            onClick={(e) => placeAtClient(e.clientX, e.clientY)}
+            onClick={(e) => placeAtClient(e.clientX, e.clientY, activeStampId ?? undefined)}
           >
             <canvas ref={canvasRef} />
-            {stamp && stamp.page === page && (
-              <div
-                className="pdf-stamp"
-                style={{
-                  left: `${stamp.cx * 100}%`,
-                  top: `${stamp.cy * 100}%`,
-                  width: `${stamp.widthFrac * 100}%`,
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => {
-                  if (!interactive) return;
-                  e.stopPropagation();
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                  dragging.current = true;
-                }}
-                onPointerMove={(e) => {
-                  if (dragging.current) placeAtClient(e.clientX, e.clientY);
-                }}
-                onPointerUp={() => {
-                  dragging.current = false;
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={stamp.png} alt="Signature stamp" />
-                {stamp.caption && (
-                  <span className="pdf-stamp-label" style={{ color: stamp.captionColor }}>
-                    {stamp.caption}
-                  </span>
-                )}
-              </div>
-            )}
+            {allStamps
+              .filter((s) => s.page === page)
+              .map((s, idx) => {
+                const sid = s.id ?? `stamp-${idx}`;
+                const isSelected = !activeStampId || activeStampId === sid;
+                return (
+                  <div
+                    key={sid}
+                    className={`pdf-stamp ${isSelected ? 'selected' : ''}`}
+                    style={{
+                      left: `${s.cx * 100}%`,
+                      top: `${s.cy * 100}%`,
+                      width: `${s.widthFrac * 100}%`,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectStamp?.(sid);
+                    }}
+                    onPointerDown={(e) => {
+                      if (!interactive) return;
+                      e.stopPropagation();
+                      onSelectStamp?.(sid);
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      draggingId.current = sid;
+                    }}
+                    onPointerMove={(e) => {
+                      if (draggingId.current === sid) placeAtClient(e.clientX, e.clientY, sid);
+                    }}
+                    onPointerUp={() => {
+                      draggingId.current = null;
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={s.png} alt="Signature stamp" />
+                    {s.caption && (
+                      <span className="pdf-stamp-label" style={{ color: s.captionColor }}>
+                        {s.caption}
+                      </span>
+                    )}
+
+                    {/* Direct Corner Resize Handle (drag bottom-right dot directly on paper) */}
+                    {interactive && onResize && (
+                      <span
+                        className="stamp-resize-dot"
+                        title="Drag corner to resize signature"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          resizingRef.current = { id: sid, startX: e.clientX, startW: s.widthFrac };
+                        }}
+                        onPointerMove={(e) => {
+                          const r = resizingRef.current;
+                          if (!r || r.id !== sid || !pageBoxRef.current) return;
+                          e.stopPropagation();
+                          const pageW = pageBoxRef.current.getBoundingClientRect().width || 600;
+                          const deltaFrac = ((e.clientX - r.startX) / pageW) * 2;
+                          const nextW = Math.min(0.6, Math.max(0.08, r.startW + deltaFrac));
+                          onResize(nextW, sid);
+                        }}
+                        onPointerUp={(e) => {
+                          e.stopPropagation();
+                          resizingRef.current = null;
+                        }}
+                      />
+                    )}
+
+                    {/* Remove Stamp button when multiple stamps exist */}
+                    {interactive && onRemoveStamp && allStamps.length > 1 && (
+                      <button
+                        type="button"
+                        className="stamp-delete-dot"
+                        title="Remove this stamp"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveStamp(sid);
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>

@@ -44,6 +44,7 @@ export interface TeamMember {
   role: OrgRole;
   department: string;
   status?: 'active' | 'invited';
+  savedSignature?: string | null;
   createdAt: string;
   lastLoginAt?: string | null;
 }
