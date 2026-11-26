@@ -1032,6 +1032,74 @@ input[type='range'] { width: 100%; accent-color: var(--primary); cursor: pointer
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
 }
 
+/* ── Route Navigation Progress Bar + Page Entrance + Shimmer Skeletons ── */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 300;
+  pointer-events: none;
+  background: transparent;
+}
+.route-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--primary-600), #38bdf8);
+  box-shadow: 0 0 12px var(--primary);
+  border-radius: 0 999px 999px 0;
+  transition: width 0.22s var(--ease-out);
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+.page-enter {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: pageEnter 0.28s var(--ease-out) both;
+  }
+}
+
+@keyframes skelShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skel {
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--border) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  @media (prefers-reduced-motion: no-preference) {
+    animation: skelShimmer 1.4s ease-in-out infinite;
+  }
+}
+.skel-pill {
+  height: 24px;
+  border-radius: 999px;
+}
+.skel-line {
+  height: 16px;
+}
+.skel-box {
+  width: 100%;
+  border-radius: 14px;
+}
+
 /* ── Interactive Spotlight Guided Tour (Dimmed Backdrop + Glowing Cutout + iOS Popup) ── */
 .tour-layer {
   position: fixed;

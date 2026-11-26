@@ -225,8 +225,32 @@ export default function TeamHubPage() {
       {viewTab === 'papers' && (
         <div className="card stack">
           {loading ? (
-            <div className="muted small">
-              <span className="spinner" /> Loading papers...
+            <div className="stack" aria-busy="true" aria-label="Loading papers">
+              {[1, 2, 3].map((k) => (
+                <div
+                  key={k}
+                  className="row-between"
+                  style={{
+                    padding: 16,
+                    borderRadius: 14,
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div className="stack-sm" style={{ flex: 1 }}>
+                    <div className="row">
+                      <div className="skel skel-pill" style={{ width: 84 }} />
+                      <div className="skel skel-line" style={{ width: '42%', height: 18 }} />
+                      <div className="skel skel-pill" style={{ width: 110 }} />
+                    </div>
+                    <div className="row">
+                      <div className="skel skel-pill" style={{ width: 130 }} />
+                      <div className="skel skel-pill" style={{ width: 145 }} />
+                    </div>
+                  </div>
+                  <div className="skel skel-line" style={{ width: 120, height: 34, borderRadius: 10 }} />
+                </div>
+              ))}
             </div>
           ) : filteredDocs.length === 0 ? (
             <div className="stack" style={{ padding: '28px 0', textAlign: 'center' }}>

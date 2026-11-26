@@ -262,10 +262,27 @@ export function CoSignWorkspace({ token }: { token: string }) {
 
   if (!doc) {
     return (
-      <div className="card">
-        <span className="row muted">
-          <span className="spinner" /> Opening paper...
-        </span>
+      <div className="stack" aria-busy="true" aria-label="Loading paper">
+        <div className="card row-between" style={{ padding: '14px 20px' }}>
+          <div className="row" style={{ flex: 1 }}>
+            <div className="skel skel-pill" style={{ width: 90 }} />
+            <div className="skel skel-line" style={{ width: '32%', height: 20 }} />
+            <div className="skel skel-pill" style={{ width: 130 }} />
+          </div>
+          <div className="skel skel-pill" style={{ width: 100 }} />
+        </div>
+        <div className="grid-split">
+          <div className="card stack">
+            <div className="skel skel-line" style={{ width: '45%', height: 20 }} />
+            <div className="skel skel-box" style={{ height: 480 }} />
+          </div>
+          <div className="card stack">
+            <div className="skel skel-line" style={{ width: '50%', height: 20 }} />
+            <div className="skel skel-line" style={{ width: '100%', height: 38 }} />
+            <div className="skel skel-box" style={{ height: 150 }} />
+            <div className="skel skel-line" style={{ width: '100%', height: 46, borderRadius: 12 }} />
+          </div>
+        </div>
       </div>
     );
   }

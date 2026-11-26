@@ -3,6 +3,7 @@ import './globals.css';
 import { AuthProvider } from '@/components/AuthProvider';
 import { GuidedTourProvider } from '@/components/GuidedTour';
 import { Nav } from '@/components/Nav';
+import { PageTransition, RouteProgressBar } from '@/components/RouteProgress';
 import { ToastProvider } from '@/components/Toast';
 import { isSupabaseConfigured, mailTransport } from '@/lib/server/config';
 
@@ -34,9 +35,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ToastProvider>
           <AuthProvider>
             <GuidedTourProvider>
+              <RouteProgressBar />
               <div className="app-shell">
                 <Nav />
-                <main className="container">{children}</main>
+                <main className="container">
+                  <PageTransition>{children}</PageTransition>
+                </main>
                 <footer className="site-footer">
                   <div className="site-footer-inner">
                     <div className="row" style={{ gap: 10 }}>

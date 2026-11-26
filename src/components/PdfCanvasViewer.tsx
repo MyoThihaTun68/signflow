@@ -212,9 +212,10 @@ export function PdfCanvasViewer({
         {error ? (
           <div className="alert alert-danger">{error}</div>
         ) : !data || loading ? (
-          <div className="pdf-loading">
-            <span className="row">
-              <span className="spinner" /> Rendering PDF canvas...
+          <div className="pdf-loading stack" style={{ maxWidth: 520, padding: 20 }}>
+            <div className="skel skel-box" style={{ width: '100%', height: 360 }} />
+            <span className="row small muted" style={{ justifyContent: 'center' }}>
+              <span className="spinner" /> Rendering PDF page...
             </span>
           </div>
         ) : (
