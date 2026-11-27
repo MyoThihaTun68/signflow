@@ -57,6 +57,77 @@ export default function TeamHubPage() {
   const [newRole, setNewRole] = useState<OrgRole>('director');
   const [savingMember, setSavingMember] = useState(false);
 
+  // Owner-only Edit & Remove State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole, setEditRole] = useState<OrgRole>('director');
+  const [editDept, setEditDept] = useState('');
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+
+  const isOwner = Boolean(user?.isOwner);
+
+  const startEdit = (m: TeamMember) => {
+    setEditingId(m.id);
+    setEditName(m.name);
+    setEditEmail(m.email);
+    setEditRole(m.role);
+    setEditDept(m.department || roleLabel(m.role));
+    setConfirmRemoveId(null);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent, id: string) => {
+    e.preventDefault();
+    if (!editName.trim() || !editEmail.trim()) return;
+    setUpdatingId(id);
+    try {
+      const res = await fetch('/api/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit',
+          id,
+          name: editName.trim(),
+          email: editEmail.trim(),
+          role: editRole,
+          department: editDept.trim() || roleLabel(editRole),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not update member.');
+      setRoster(data.roster ?? []);
+      setEditingId(null);
+      refreshAuth();
+      toast('Team member updated!', 'ok');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to update member', 'err');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleRemoveMember = async (m: TeamMember) => {
+    setUpdatingId(m.id);
+    try {
+      const res = await fetch('/api/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id: m.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not remove member.');
+      setRoster(data.roster ?? []);
+      setConfirmRemoveId(null);
+      refreshAuth();
+      toast(`Removed ${m.name} from team`, 'info');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to remove member', 'err');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const loadHub = useCallback(async () => {
     setLoading(true);
     try {
@@ -334,12 +405,19 @@ export default function TeamHubPage() {
       {viewTab === 'members' && (
         <div className="grid-2">
           <div className="card stack">
-            <h2>Team Members ({roster.length})</h2>
+            <div className="row-between">
+              <h2>Team Members ({roster.length})</h2>
+              {isOwner ? (
+                <span className="badge badge-primary">★ Owner Controls Enabled</span>
+              ) : (
+                <span className="small muted">Only the team owner can edit or remove members</span>
+              )}
+            </div>
             <div className="stack-sm">
               {roster.map((m) => (
                 <div
                   key={m.id}
-                  className="row-between"
+                  className="stack-sm"
                   style={{
                     padding: 14,
                     borderRadius: 12,
@@ -347,37 +425,153 @@ export default function TeamHubPage() {
                     border: '1px solid var(--border)',
                   }}
                 >
-                  <div className="row">
-                    <span className="badge badge-primary">{roleLabel(m.role)}</span>
-                    <div>
-                      <strong>{m.name}</strong>
-                      <div className="small muted">{m.email}</div>
+                  {editingId === m.id ? (
+                    <form className="stack-sm" onSubmit={(e) => handleSaveEdit(e, m.id)}>
+                      <div className="row-between">
+                        <strong className="small">Editing {m.name}</strong>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => setEditingId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <div className="grid-2" style={{ gap: 10 }}>
+                        <label className="field">
+                          <span>Full Name</span>
+                          <input
+                            className="input"
+                            required
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Email Address</span>
+                          <input
+                            className="input"
+                            type="email"
+                            required
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <label className="field">
+                        <span>Department / Title</span>
+                        <input
+                          className="input"
+                          value={editDept}
+                          onChange={(e) => setEditDept(e.target.value)}
+                        />
+                      </label>
+                      <div className="field">
+                        <span>Role</span>
+                        <RolePicker
+                          value={editRole}
+                          onChange={setEditRole}
+                          extraRoles={roster.map((r) => r.role)}
+                          allowDeleteCustom
+                        />
+                      </div>
+                      <div className="row" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setEditingId(null)}
+                          disabled={updatingId === m.id}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="btn btn-sm btn-primary"
+                          disabled={updatingId === m.id}
+                        >
+                          {updatingId === m.id ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+                      <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                        <span className="badge badge-primary">{roleLabel(m.role)}</span>
+                        <div>
+                          <div className="row" style={{ gap: 6 }}>
+                            <strong>{m.name}</strong>
+                            {m.isOwner && <span className="badge badge-warn">★ Owner</span>}
+                          </div>
+                          <div className="small muted">{m.email}</div>
+                        </div>
+                        <span className={`badge ${m.status === 'active' ? 'badge-ok' : 'badge-warn'}`}>
+                          {m.status === 'active' ? '✓ Active' : 'Invited'}
+                        </span>
+                      </div>
+
+                      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                        {m.status !== 'active' && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={() =>
+                              openAuthModal('register', {
+                                name: m.name,
+                                email: m.email,
+                                role: m.role,
+                                department: m.department,
+                              })
+                            }
+                          >
+                            Set Password
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-sm" onClick={() => copyInviteLink(m)}>
+                          Copy Invite Link
+                        </button>
+                        {isOwner && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => startEdit(m)}
+                            title="Edit member details"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {isOwner && !m.isOwner && (
+                          confirmRemoveId === m.id ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-danger"
+                                disabled={updatingId === m.id}
+                                onClick={() => handleRemoveMember(m)}
+                              >
+                                {updatingId === m.id ? 'Removing...' : 'Confirm Remove'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => setConfirmRemoveId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost btn-danger"
+                              onClick={() => setConfirmRemoveId(m.id)}
+                              title="Remove member from workspace"
+                            >
+                              Remove
+                            </button>
+                          )
+                        )}
+                      </div>
                     </div>
-                    <span className={`badge ${m.status === 'active' ? 'badge-ok' : 'badge-warn'}`}>
-                      {m.status === 'active' ? '✓ Active' : 'Invited'}
-                    </span>
-                  </div>
-                  <div className="row">
-                    {m.status !== 'active' && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-primary"
-                        onClick={() =>
-                          openAuthModal('register', {
-                            name: m.name,
-                            email: m.email,
-                            role: m.role,
-                            department: m.department,
-                          })
-                        }
-                      >
-                        Set Password
-                      </button>
-                    )}
-                    <button type="button" className="btn btn-sm" onClick={() => copyInviteLink(m)}>
-                      Copy Invite Link
-                    </button>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>

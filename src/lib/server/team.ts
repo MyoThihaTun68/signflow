@@ -42,13 +42,31 @@ const DEFAULT_TEAM: StoredTeamMember[] = [
   },
 ];
 
-export function toPublicMember(m: StoredTeamMember): TeamMember {
+/** Resolves which member is the workspace owner: explicit isOwner flag, else earliest active account. */
+export function resolveOwnerId(roster: StoredTeamMember[]): string | null {
+  const explicit = roster.find((m) => m.isOwner);
+  if (explicit) return explicit.id;
+  const active = roster
+    .filter((m) => Boolean(m.passwordHash))
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  return active[0]?.id ?? null;
+}
+
+export function isMemberOwner(roster: StoredTeamMember[], email: string): boolean {
+  const ownerId = resolveOwnerId(roster);
+  if (!ownerId) return false;
+  const clean = email.toLowerCase().trim();
+  return roster.some((m) => m.id === ownerId && m.email.toLowerCase() === clean);
+}
+
+export function toPublicMember(m: StoredTeamMember, ownerId?: string | null): TeamMember {
   return {
     id: m.id,
     name: m.name,
     email: m.email,
     role: m.role,
     department: m.department,
+    isOwner: ownerId ? m.id === ownerId : Boolean(m.isOwner),
     status: m.passwordHash ? 'active' : m.status || 'invited',
     savedSignature: m.savedSignature ?? null,
     createdAt: m.createdAt,
@@ -69,7 +87,8 @@ export async function loadStoredRoster(): Promise<StoredTeamMember[]> {
 
 export async function loadTeamRoster(): Promise<TeamMember[]> {
   const list = await loadStoredRoster();
-  return list.map(toPublicMember);
+  const ownerId = resolveOwnerId(list);
+  return list.map((m) => toPublicMember(m, ownerId));
 }
 
 export async function saveStoredRoster(members: StoredTeamMember[]): Promise<void> {
@@ -107,14 +126,19 @@ export async function registerOrActivateMember(input: {
 
   const { hash, salt } = hashPassword(input.password);
   const now = new Date().toISOString();
+  const existingOwnerId = resolveOwnerId(roster);
+  const memberId = idx >= 0 ? roster[idx].id : randomUUID();
+  const shouldBeOwner = !existingOwnerId || (idx >= 0 && Boolean(roster[idx].isOwner));
 
   const updated: StoredTeamMember = {
-    id: idx >= 0 ? roster[idx].id : randomUUID(),
+    id: memberId,
     name: input.name.trim() || (idx >= 0 ? roster[idx].name : cleanEmail.split('@')[0]),
     email: cleanEmail,
     role: input.role || (idx >= 0 ? roster[idx].role : 'hr'),
     department: input.department.trim() || (idx >= 0 ? roster[idx].department : 'General'),
+    isOwner: shouldBeOwner,
     status: 'active',
+    savedSignature: idx >= 0 ? (roster[idx].savedSignature ?? null) : null,
     createdAt: idx >= 0 ? roster[idx].createdAt : now,
     lastLoginAt: now,
     passwordHash: hash,
@@ -125,9 +149,10 @@ export async function registerOrActivateMember(input: {
   else roster.push(updated);
   await saveStoredRoster(roster);
 
+  const ownerId = resolveOwnerId(roster);
   return {
-    member: toPublicMember(updated),
-    roster: roster.map(toPublicMember),
+    member: toPublicMember(updated, ownerId),
+    roster: roster.map((m) => toPublicMember(m, ownerId)),
   };
 }
 
@@ -142,8 +167,12 @@ export async function authenticateMember(email: string, password: string): Promi
   }
   member.lastLoginAt = new Date().toISOString();
   member.status = 'active';
+  const ownerId = resolveOwnerId(roster);
+  if (ownerId && member.id === ownerId && !member.isOwner) {
+    member.isOwner = true;
+  }
   await saveStoredRoster(roster);
-  return toPublicMember(member);
+  return toPublicMember(member, ownerId);
 }
 
 export async function upsertTeamMember(input: {
@@ -162,7 +191,9 @@ export async function upsertTeamMember(input: {
     email: cleanEmail,
     role: input.role,
     department: input.department.trim() || 'General',
+    isOwner: prev?.isOwner,
     status: prev?.passwordHash ? 'active' : 'invited',
+    savedSignature: prev?.savedSignature ?? null,
     createdAt: prev ? prev.createdAt : new Date().toISOString(),
     lastLoginAt: prev?.lastLoginAt ?? null,
     passwordHash: prev?.passwordHash,
@@ -171,14 +202,44 @@ export async function upsertTeamMember(input: {
   if (existingIdx >= 0) roster[existingIdx] = member;
   else roster.push(member);
   await saveStoredRoster(roster);
-  return roster.map(toPublicMember);
+  const ownerId = resolveOwnerId(roster);
+  return roster.map((m) => toPublicMember(m, ownerId));
+}
+
+export async function updateTeamMember(
+  id: string,
+  input: { name: string; email: string; role: OrgRole; department: string },
+): Promise<TeamMember[]> {
+  const roster = await loadStoredRoster();
+  const idx = roster.findIndex((m) => m.id === id);
+  if (idx < 0) throw new Error('MEMBER_NOT_FOUND');
+  const cleanEmail = input.email.toLowerCase().trim();
+  const duplicate = roster.find((m) => m.id !== id && m.email.toLowerCase() === cleanEmail);
+  if (duplicate) throw new Error('EMAIL_IN_USE');
+
+  const prev = roster[idx];
+  roster[idx] = {
+    ...prev,
+    name: input.name.trim() || prev.name,
+    email: cleanEmail || prev.email,
+    role: input.role || prev.role,
+    department: input.department.trim() || prev.department,
+  };
+  await saveStoredRoster(roster);
+  const ownerId = resolveOwnerId(roster);
+  return roster.map((m) => toPublicMember(m, ownerId));
 }
 
 export async function removeTeamMember(id: string): Promise<TeamMember[]> {
   const roster = await loadStoredRoster();
+  const ownerId = resolveOwnerId(roster);
+  if (ownerId && id === ownerId) {
+    throw new Error('CANNOT_REMOVE_OWNER');
+  }
   const next = roster.filter((m) => m.id !== id);
   await saveStoredRoster(next);
-  return next.map(toPublicMember);
+  const nextOwnerId = resolveOwnerId(next);
+  return next.map((m) => toPublicMember(m, nextOwnerId));
 }
 
 export async function saveMemberSignature(email: string, signaturePng: string | null): Promise<TeamMember | null> {
@@ -188,7 +249,7 @@ export async function saveMemberSignature(email: string, signaturePng: string | 
   if (idx < 0) return null;
   roster[idx].savedSignature = signaturePng;
   await saveStoredRoster(roster);
-  return toPublicMember(roster[idx]);
+  return toPublicMember(roster[idx], resolveOwnerId(roster));
 }
 
 /* ── Signed Auth Session Cookie & Email Invite Token ── */

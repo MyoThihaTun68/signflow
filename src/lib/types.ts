@@ -43,6 +43,7 @@ export interface TeamMember {
   email: string;
   role: OrgRole;
   department: string;
+  isOwner?: boolean;
   status?: 'active' | 'invited';
   savedSignature?: string | null;
   createdAt: string;

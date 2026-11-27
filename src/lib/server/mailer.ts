@@ -123,6 +123,62 @@ export function otpEmail(p: { to: string; code: string; title: string; refCode: 
   };
 }
 
+export function teamInviteEmail(p: {
+  to: string;
+  name: string;
+  roleLabel: string;
+  department: string;
+  inviterName: string;
+  inviteUrl: string;
+}): MailMessage {
+  const text = [
+    `Hello ${p.name},`,
+    ``,
+    `${p.inviterName} has invited you to join SignFlow Team Hub.`,
+    ``,
+    `Account Details:`,
+    `  • Role: ${p.roleLabel}`,
+    `  • Department: ${p.department}`,
+    `  • Email: ${p.to}`,
+    ``,
+    `Activate your account & set your password:`,
+    p.inviteUrl,
+    ``,
+    `This invitation link is valid for 7 days. After setup, sign in anytime with ${p.to}.`,
+  ].join('\n');
+
+  const body = `
+<p style="margin:0 0 14px;font-size:15px;line-height:1.55">Hello <strong>${escapeHtml(p.name)}</strong>,</p>
+<p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#334155">
+  <strong>${escapeHtml(p.inviterName)}</strong> has invited you to join your organization's <strong>SignFlow Team Hub</strong> to review, co-sign, and verify documents.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin:0 0 20px">
+  <tr>
+    <td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Assigned Role</td>
+    <td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;font-size:14px;font-weight:600;color:#0f172a">${escapeHtml(p.roleLabel)}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#64748b">Department</td>
+    <td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;font-size:14px;color:#0f172a">${escapeHtml(p.department)}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px;font-size:13px;color:#64748b">Sign-In Email</td>
+    <td style="padding:12px 16px;font-size:14px;color:#0f172a">${escapeHtml(p.to)}</td>
+  </tr>
+</table>
+${button(p.inviteUrl, 'Accept Invite & Set Password')}
+<p style="margin:14px 0 0;font-size:12px;color:#64748b;line-height:1.5">
+  This invite link expires in 7 days. Once your password is set, you can sign in anytime with <strong>${escapeHtml(p.to)}</strong>.
+</p>`;
+
+  return {
+    to: p.to,
+    subject: `${p.inviterName} invited you to SignFlow (${p.roleLabel})`,
+    text,
+    html: layout('You’re invited to SignFlow Team Hub', body),
+  };
+}
+
 export function completedEmail(p: {
   to: string[];
   title: string;

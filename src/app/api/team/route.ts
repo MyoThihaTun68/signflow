@@ -2,9 +2,18 @@ import { isSupabaseConfigured } from '@/lib/server/config';
 import { getRepo } from '@/lib/server/db';
 import { toPublicEvents } from '@/lib/server/documents';
 import { baseUrl, cleanText, isValidEmail, jsonError } from '@/lib/server/http';
-import { escapeHtml, sendMail } from '@/lib/server/mailer';
+import { sendMail, teamInviteEmail } from '@/lib/server/mailer';
 import { supabaseAdmin } from '@/lib/server/supabase';
-import { createInviteToken, loadTeamRoster, readAuthSession, removeTeamMember, upsertTeamMember } from '@/lib/server/team';
+import {
+  createInviteToken,
+  isMemberOwner,
+  loadStoredRoster,
+  loadTeamRoster,
+  readAuthSession,
+  removeTeamMember,
+  updateTeamMember,
+  upsertTeamMember,
+} from '@/lib/server/team';
 import { normalizeRole, roleLabel, type OrgRole } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -64,9 +73,10 @@ export async function GET(req: Request) {
   );
 }
 
-/** Creates/updates a team member by email & role, and optionally sends an email invitation. */
+/** Creates/updates/removes a team member by email & role, and optionally sends an email invitation. */
 export async function POST(req: Request) {
-  if (!readAuthSession(req)) return jsonError('Sign in required.', 401);
+  const sessionUser = readAuthSession(req);
+  if (!sessionUser) return jsonError('Sign in required.', 401);
   const body = (await req.json().catch(() => ({}))) as {
     action?: unknown;
     id?: unknown;
@@ -78,8 +88,41 @@ export async function POST(req: Request) {
   };
 
   if (body.action === 'remove' && typeof body.id === 'string') {
-    const roster = await removeTeamMember(body.id);
-    return Response.json({ roster });
+    const stored = await loadStoredRoster();
+    if (!isMemberOwner(stored, sessionUser.email)) {
+      return jsonError('Only the workspace owner can remove team members.', 403);
+    }
+    try {
+      const roster = await removeTeamMember(body.id);
+      return Response.json({ roster });
+    } catch (err) {
+      if (err instanceof Error && err.message === 'CANNOT_REMOVE_OWNER') {
+        return jsonError('Cannot remove the workspace owner.', 400);
+      }
+      return jsonError('Could not remove team member.', 500);
+    }
+  }
+
+  if (body.action === 'edit' && typeof body.id === 'string') {
+    const stored = await loadStoredRoster();
+    if (!isMemberOwner(stored, sessionUser.email)) {
+      return jsonError('Only the workspace owner can edit team members.', 403);
+    }
+    const name = cleanText(body.name, 120);
+    const email = cleanText(body.email, 254).toLowerCase();
+    const role: OrgRole = normalizeRole(body.role, 'director');
+    const department = cleanText(body.department, 100) || roleLabel(role);
+    if (!name) return jsonError('Enter the team member name.');
+    if (!email || !isValidEmail(email)) return jsonError('Enter a valid email address.');
+    try {
+      const roster = await updateTeamMember(body.id, { name, email, role, department });
+      return Response.json({ roster });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'MEMBER_NOT_FOUND') return jsonError('Team member not found.', 404);
+      if (msg === 'EMAIL_IN_USE') return jsonError('Another team member already uses this email.', 409);
+      return jsonError('Could not update team member.', 500);
+    }
   }
 
   const name = cleanText(body.name, 120);
@@ -99,19 +142,17 @@ export async function POST(req: Request) {
   let inviteError: string | null = null;
 
   if (body.sendInvite !== false) {
-    // 1. Try configured SMTP / Resend first
-    const mail = await sendMail({
-      to: email,
-      subject: `You're invited to SignFlow Team Hub as ${roleLabel(role)}`,
-      text: `Hello ${name},\n\nYou have been invited to the SignFlow Organization Hub as ${roleLabel(role)} (${department}).\n\nClick your personal invite link to activate your account & set your password:\n${inviteUrl}\n\nNext time, you can simply sign in with your email (${email}).`,
-      html: `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-        <h2 style="margin:0 0 12px;color:#007aff">SignFlow Team Hub Invitation</h2>
-        <p>Hello <strong>${escapeHtml(name)}</strong>,</p>
-        <p>You have been invited to your organization's <strong>SignFlow Team Hub</strong> with the role <strong>${escapeHtml(roleLabel(role))}</strong> (${escapeHtml(department)}).</p>
-        <p style="margin:22px 0"><a href="${escapeHtml(inviteUrl)}" style="background:#007aff;color:#fff;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600">Accept Invite &amp; Create Account</a></p>
-        <p style="font-size:12px;color:#6e6e73">Invite link: ${escapeHtml(inviteUrl)}</p>
-      </div>`,
-    });
+    // 1. Try configured SMTP / Resend first using polished responsive SignFlow email template
+    const mail = await sendMail(
+      teamInviteEmail({
+        to: email,
+        name,
+        roleLabel: roleLabel(role),
+        department,
+        inviterName: sessionUser.name,
+        inviteUrl,
+      }),
+    );
 
     if (mail.delivered) {
       inviteDelivered = true;
@@ -122,7 +163,13 @@ export async function POST(req: Request) {
         const sb = supabaseAdmin();
         const { error: invErr } = await sb.auth.admin.inviteUserByEmail(email, {
           redirectTo: inviteUrl,
-          data: { name, role, department },
+          data: {
+            name,
+            role,
+            role_label: roleLabel(role),
+            department,
+            inviter_name: sessionUser.name,
+          },
         });
         if (!invErr) {
           inviteDelivered = true;
